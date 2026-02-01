@@ -1,0 +1,44 @@
+version: "3.9"
+
+# =============================================================================
+# Coinr Market Metrics - Services
+# =============================================================================
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: coinr-market-metrics-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - coinr-market-metrics-network
+
+  market-scanner:
+    build:
+      context: .
+      dockerfile: scanner-job/Dockerfile
+    container_name: coinr-market-metrics-market-scanner
+    restart: "no"
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - coinr-market-metrics-network
+
+networks:
+  coinr-market-metrics-network:
+    external: true

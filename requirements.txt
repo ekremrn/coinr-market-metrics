@@ -1,0 +1,25 @@
+# =============================================================================
+# Coinr Market Metrics - Dependencies
+# =============================================================================
+
+# Core
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+
+# API
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Binance API
+requests>=2.31.0
+git+https://github.com/ekremrn/binance-futures-python
+
+# Storage
+redis>=5.0.0
+pymongo>=4.6.0
+
+# Data
+numpy>=1.24.0
+
+# Tests
+pytest>=7.4.0
