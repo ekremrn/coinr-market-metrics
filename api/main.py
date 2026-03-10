@@ -1,77 +1,35 @@
-"""FastAPI app exposing SSE and snapshot endpoints."""
+"""FastAPI application entry point."""
 
 from __future__ import annotations
 
-import asyncio
-import json
-from typing import AsyncGenerator, Optional
-
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse, StreamingResponse
 
-from src.config import RedisConfig
+from api.routes import snapshot, sse
+from api.store import redis_store
 from src.logging import get_logger
-from src.storage import AsyncRedisStore
-
 
 logger = get_logger("market-metrics-api")
-app = FastAPI(title="coinr-market-metrics", version="v1")
-redis_store = AsyncRedisStore(RedisConfig())
 
+app = FastAPI(
+    title="Coinr Market Metrics",
+    version="v1",
+    description="""
+Real-time USDT-perpetual futures market metrics streamed via SSE.
 
-def format_sse(payload: Optional[object]) -> str:
-    if payload is None:
-        return ""
-    data = json.dumps(payload, separators=(",", ":"))
-    return f"data: {data}\n\n"
+### How it works
+The **scanner job** runs on a fixed schedule and writes a full market snapshot
+to Redis. The **API** serves that snapshot via:
 
+- **SSE endpoints** — push updates to connected clients whenever a new snapshot lands.
+- **Snapshot endpoint** — single HTTP pull of the latest state.
 
-async def stream_key(key: str) -> AsyncGenerator[str, None]:
-    pubsub = redis_store.pubsub()
-    await pubsub.subscribe("market_state:events")
+### Data freshness
+Snapshots are produced every `SCAN_INTERVAL_MINUTES` (default 15 min).
+""",
+)
 
-    try:
-        latest = await redis_store.get_json(key)
-        if latest is not None:
-            yield format_sse(latest)
-
-        async for message in pubsub.listen():
-            if message.get("type") != "message":
-                continue
-            latest = await redis_store.get_json(key)
-            if latest is not None:
-                yield format_sse(latest)
-            await asyncio.sleep(0)
-    except asyncio.CancelledError:
-        raise
-    finally:
-        await pubsub.unsubscribe("market_state:events")
-        await pubsub.close()
-
-
-@app.get("/sse/market")
-async def sse_market() -> StreamingResponse:
-    return StreamingResponse(
-        stream_key("market_state:latest"),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
-
-
-@app.get("/sse/candidates")
-async def sse_candidates() -> StreamingResponse:
-    return StreamingResponse(
-        stream_key("market_state:candidates:latest"),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
-
-
-@app.get("/snapshot/latest")
-async def snapshot_latest() -> JSONResponse:
-    market_state = await redis_store.get_json("market_state:latest")
-    candidates = await redis_store.get_json("market_state:candidates:latest")
-    return JSONResponse({"market_state": market_state, "candidates": candidates})
+app.include_router(sse.router)
+app.include_router(snapshot.router)
 
 
 @app.on_event("shutdown")
