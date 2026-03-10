@@ -10,7 +10,7 @@ A standalone microservice that computes market-state metrics from Binance USDT p
 - Serves SSE streams for live consumers.
 
 ## Running locally
-1) Copy `.env.example` to `.env` and fill in Binance API keys.
+1) Copy `.env.example` to `.env` and set your Redis and MongoDB connection strings.
 2) Start infrastructure (Redis + MongoDB):
 
 ```bash

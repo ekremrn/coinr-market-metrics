@@ -21,7 +21,7 @@ services:
         max-size: "10m"
         max-file: "3"
     networks:
-      - coinr-market-metrics-network
+      - coinr-network
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 30s
@@ -43,7 +43,7 @@ services:
         max-size: "10m"
         max-file: "3"
     networks:
-      - coinr-market-metrics-network
+      - coinr-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -57,6 +57,5 @@ volumes:
     driver: local
 
 networks:
-  coinr-market-metrics-network:
-    name: coinr-market-metrics-network
-    driver: bridge
+  coinr-network:
+    external: true
