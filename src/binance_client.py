@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from binance_futures_python import BinanceFuturesClient, BinanceFuturesAPIError
 
-from src.config import BinanceConfig
 from src.logging import Logger, LogContext
 
 
@@ -34,16 +33,14 @@ class BinanceDataFetcher:
 
     def __init__(
         self,
-        config: BinanceConfig,
         logger: Logger,
         max_concurrency: int = 6,
         min_interval: float = 0.12,
         max_retries: int = 3,
     ) -> None:
         self._client = BinanceFuturesClient(
-            api_key=config.api_key,
-            api_secret=config.api_secret,
-            use_testnet=config.use_testnet,
+            api_key=None,
+            api_secret=None,
         )
         self._logger = logger
         self._semaphore = asyncio.Semaphore(max_concurrency)
@@ -89,6 +86,12 @@ class BinanceDataFetcher:
 
     async def get_book_tickers(self) -> Optional[List[Dict[str, Any]]]:
         data = await self._call(self._client.get_book_ticker)
+        if isinstance(data, dict):
+            return [data]
+        return data
+
+    async def get_premium_index(self) -> Optional[List[Dict[str, Any]]]:
+        data = await self._call(self._client.get_premium_index)
         if isinstance(data, dict):
             return [data]
         return data

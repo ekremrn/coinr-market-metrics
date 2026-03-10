@@ -8,7 +8,6 @@ from typing import Any, Dict, Optional
 import redis
 import redis.asyncio as aioredis
 from pymongo import MongoClient
-from pymongo.uri_parser import parse_uri
 
 from src.config import MongoConfig, RedisConfig
 
@@ -59,12 +58,7 @@ class MongoStore:
     def __init__(self, config: Optional[MongoConfig] = None) -> None:
         cfg = config or MongoConfig()
         self._client = MongoClient(cfg.uri)
-        if cfg.database:
-            self._db = self._client[cfg.database]
-        else:
-            parsed = parse_uri(cfg.uri)
-            db_name = parsed.get("database") or "coinr_market_metrics"
-            self._db = self._client[db_name]
+        self._db = self._client[cfg.database]
 
     def insert_snapshot(self, document: Dict[str, Any]) -> str:
         collection = self._db["market_state_snapshots"]

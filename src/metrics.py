@@ -127,6 +127,12 @@ def normalize_range(value: Optional[float], low: float, high: float) -> float:
     return clamp((value - low) / (high - low), 0.0, 1.0)
 
 
+def normalize_symmetric(value: Optional[float], max_abs: float) -> float:
+    if value is None or max_abs <= 0:
+        return 0.5
+    return clamp((value + max_abs) / (2 * max_abs), 0.0, 1.0)
+
+
 def volatility_band_score(atrp: Optional[float]) -> float:
     if atrp is None:
         return 0.0
@@ -186,6 +192,7 @@ def build_symbol_features(
     klines_15m: Optional[List[List[Any]]],
     klines_1h: Optional[List[List[Any]]],
     book: Optional[Dict[str, Any]],
+    funding_rate: Optional[float] = None,
 ) -> Dict[str, Any]:
     parsed_15m = parse_klines(klines_15m)
     parsed_1h = parse_klines(klines_1h)
@@ -231,6 +238,7 @@ def build_symbol_features(
         "taker_dominance_15m": taker_dominance,
         "spread_bps": spread_bps,
         "returns_1h": returns_1h,
+        "funding_rate": funding_rate,
     }
 
 
@@ -363,6 +371,18 @@ def build_market_metrics(
     vol_scores = [volume_score(item.get("vol_ratio_15m")) for item in features]
     volume_health = float(np.mean(vol_scores)) if vol_scores else 0.0
 
+    funding_rates = [
+        item.get("funding_rate") for item in features if item.get("funding_rate") is not None
+    ]
+    funding_rate_avg = float(np.mean(funding_rates)) if funding_rates else None
+    funding_rate_avg_8h = normalize_symmetric(funding_rate_avg, 0.003)
+    if funding_rate_avg is None or abs(funding_rate_avg) < 0.0001:
+        funding_rate_direction = "neutral"
+    elif funding_rate_avg > 0:
+        funding_rate_direction = "positive"
+    else:
+        funding_rate_direction = "negative"
+
     recommended_mode = "SELECTIVE"
     if market_regime == "OFF":
         recommended_mode = "OFF"
@@ -384,6 +404,8 @@ def build_market_metrics(
         "volatility_regime": volatility_regime,
         "volume_health_15m": volume_health,
         "recommended_mode": recommended_mode,
+        "funding_rate_avg_8h": funding_rate_avg_8h,
+        "funding_rate_direction": funding_rate_direction,
         "adx15_mean": adx_mean,
         "chop_ratio": chop_ratio,
         "atrp_mean_15m": atrp_mean,
