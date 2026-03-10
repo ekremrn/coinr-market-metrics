@@ -1,8 +1,3 @@
-version: "3.9"
-
-# =============================================================================
-# Coinr Market Metrics - Services
-# =============================================================================
 
 services:
   app:
@@ -21,7 +16,7 @@ services:
         max-size: "10m"
         max-file: "3"
     networks:
-      - coinr-market-metrics-network
+      - coinr-network
 
   market-scanner:
     build:
@@ -37,8 +32,8 @@ services:
         max-size: "10m"
         max-file: "3"
     networks:
-      - coinr-market-metrics-network
+      - coinr-network
 
 networks:
-  coinr-market-metrics-network:
+  coinr-network:
     external: true

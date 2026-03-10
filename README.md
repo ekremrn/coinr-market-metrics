@@ -37,6 +37,25 @@ API:
 Convenience:
 - `make setup`, `make infra-up`, `make services-up`, `make up`
 
+## API curl examples
+Fetch latest snapshot:
+
+```bash
+curl http://localhost:8000/snapshot/latest
+```
+
+Stream market updates (SSE):
+
+```bash
+curl -N http://localhost:8000/sse/market
+```
+
+Stream candidates (SSE):
+
+```bash
+curl -N http://localhost:8000/sse/candidates
+```
+
 ## Metrics overview (v1)
 Market metrics (all normalized 0..1 or categorical):
 - `tradeability_score`: mean ADX(15m), 0 at <=22, 1 at >=30
@@ -51,6 +70,8 @@ Market metrics (all normalized 0..1 or categorical):
 - `volatility_regime`: LOW / NORMAL / HIGH
 - `volume_health_15m`: mean volume score from 15m volume ratios
 - `recommended_mode`: OFF / SHORT_ONLY / LONG_ONLY / SELECTIVE
+- `funding_rate_avg_8h`: average of latest funding rates across universe, normalized from -0.003..0.003 to [0,1]
+- `funding_rate_direction`: positive / negative / neutral
 
 Coin metrics (per symbol in top N):
 - `dir_1h`, `dir_15m`: EMA9 vs EMA21

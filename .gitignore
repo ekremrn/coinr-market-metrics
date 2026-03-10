@@ -4,7 +4,6 @@ __pycache__/
 *.pyd
 .venv/
 .env
-.env.*
 .idea/
 .vscode/
 .pytest_cache/
