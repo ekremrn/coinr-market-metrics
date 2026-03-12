@@ -24,21 +24,18 @@ def _format_sse(payload: object) -> str:
 
 
 async def _stream_signals() -> AsyncGenerator[str, None]:
-    pubsub = redis_store.pubsub()
-    await pubsub.subscribe(_EVENTS_CHANNEL)
-
+    q = await redis_store.subscribe(_EVENTS_CHANNEL)
     try:
         # Emit currently active signals immediately on connect
         active = await redis_store.get_recent_signals(_SIGNALS_KEY, _SIGNAL_TTL_SECONDS)
         for signal in active:
             yield _format_sse(signal)
 
-        # Stream new signals in real-time
-        async for message in pubsub.listen():
-            if message.get("type") != "message":
-                continue
+        # Stream new signals in real-time — the hub delivers raw JSON data
+        while True:
+            data = await q.get()
             try:
-                payload = json.loads(message["data"])
+                payload = json.loads(data)
                 yield _format_sse(payload)
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -46,8 +43,7 @@ async def _stream_signals() -> AsyncGenerator[str, None]:
     except asyncio.CancelledError:
         raise
     finally:
-        await pubsub.unsubscribe(_EVENTS_CHANNEL)
-        await pubsub.aclose()
+        await redis_store.unsubscribe(_EVENTS_CHANNEL, q)
 
 
 @router.get(

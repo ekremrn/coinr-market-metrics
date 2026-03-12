@@ -41,17 +41,14 @@ def format_sse(payload: Optional[object]) -> str:
 
 
 async def stream_key(key: str) -> AsyncGenerator[str, None]:
-    pubsub = redis_store.pubsub()
-    await pubsub.subscribe("market_state:events")
-
+    q = await redis_store.subscribe("market_state:events")
     try:
         latest = await redis_store.get_json(key)
         if latest is not None:
             yield format_sse(latest)
 
-        async for message in pubsub.listen():
-            if message.get("type") != "message":
-                continue
+        while True:
+            await q.get()  # notification only — re-fetch value from Redis
             latest = await redis_store.get_json(key)
             if latest is not None:
                 yield format_sse(latest)
@@ -59,8 +56,7 @@ async def stream_key(key: str) -> AsyncGenerator[str, None]:
     except asyncio.CancelledError:
         raise
     finally:
-        await pubsub.unsubscribe("market_state:events")
-        await pubsub.close()
+        await redis_store.unsubscribe("market_state:events", q)
 
 
 @router.get(
