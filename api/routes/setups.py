@@ -33,7 +33,11 @@ async def _stream_signals() -> AsyncGenerator[str, None]:
 
         # Stream new signals in real-time — the hub delivers raw JSON data
         while True:
-            data = await q.get()
+            try:
+                data = await asyncio.wait_for(q.get(), timeout=30)
+            except asyncio.TimeoutError:
+                yield 'data: {"type":"keepalive"}\n\n'  # refreshes client stale clock
+                continue
             try:
                 payload = json.loads(data)
                 yield _format_sse(payload)

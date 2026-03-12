@@ -40,6 +40,9 @@ def format_sse(payload: Optional[object]) -> str:
     return f"data: {data}\n\n"
 
 
+_KEEPALIVE_INTERVAL = 30  # seconds between SSE keepalive pings
+
+
 async def stream_key(key: str) -> AsyncGenerator[str, None]:
     q = await redis_store.subscribe("market_state:events")
     try:
@@ -48,7 +51,12 @@ async def stream_key(key: str) -> AsyncGenerator[str, None]:
             yield format_sse(latest)
 
         while True:
-            await q.get()  # notification only — re-fetch value from Redis
+            try:
+                await asyncio.wait_for(q.get(), timeout=_KEEPALIVE_INTERVAL)
+            except asyncio.TimeoutError:
+                yield 'data: {"type":"keepalive"}\n\n'  # refreshes client stale clock
+                continue
+            # Got a notification — re-fetch value from Redis
             latest = await redis_store.get_json(key)
             if latest is not None:
                 yield format_sse(latest)
