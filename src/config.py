@@ -36,6 +36,19 @@ class MongoConfig:
 
 
 @dataclass(frozen=True)
+class ApiConfig:
+    """API server configuration."""
+    production: bool = field(
+        default_factory=lambda: os.getenv("PRODUCTION", "false").lower() == "true"
+    )
+    cors_origins: list = field(
+        default_factory=lambda: [
+            o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
+        ]
+    )
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """Scanner / application-level configuration."""
     top_n: int = field(default_factory=lambda: int(os.getenv("TOP_N", "20")))

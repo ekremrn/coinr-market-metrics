@@ -421,7 +421,6 @@ def select_candidates(symbols: List[Dict[str, Any]], k: int = 10) -> List[Dict[s
         candidates.append(
             {
                 "symbol": item.get("symbol"),
-                "score": item.get("attractiveness_score", 0.0),
                 "flags": item.get("flags", []),
                 "dir_15m": item.get("dir_15m"),
                 "dir_1h": item.get("dir_1h"),
@@ -430,6 +429,9 @@ def select_candidates(symbols: List[Dict[str, Any]], k: int = 10) -> List[Dict[s
                 "atrp_15m": item.get("atrp_15m"),
                 "vol_ratio_15m": item.get("vol_ratio_15m"),
                 "taker_dominance_15m": item.get("taker_dominance_15m"),
+                "liquidity_score": item.get("liquidity_score", 0.0),
+                "trend_score": item.get("trend_score", 0.0),
+                "attractiveness_score": item.get("attractiveness_score", 0.0),
             }
         )
     return candidates

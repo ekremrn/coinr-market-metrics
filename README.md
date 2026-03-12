@@ -30,30 +30,40 @@ docker compose -f docker-compose.yml run --rm market-scanner
 ```
 
 API:
-- `GET /sse/market` – stream full market snapshot
-- `GET /sse/candidates` – stream candidate updates
-- `GET /snapshot/latest` – latest snapshot (REST)
+- `GET /market` – latest snapshot (REST)
+- `GET /market/stream` – stream full market snapshot
+- `GET /candidates/stream` – stream candidate updates
+- `GET /setups` – active trade setups, last 120 min (REST)
+- `GET /setups/stream` – stream trade setups
 
 Convenience:
 - `make setup`, `make infra-up`, `make services-up`, `make up`
 
 ## API curl examples
-Fetch latest snapshot:
 
+### Market snapshot (REST)
 ```bash
-curl http://localhost:8000/snapshot/latest
+curl http://localhost:8000/market
 ```
 
-Stream market updates (SSE):
-
+### Stream full market snapshot (SSE)
 ```bash
-curl -N http://localhost:8000/sse/market
+curl -N http://localhost:8000/market/stream
 ```
 
-Stream candidates (SSE):
-
+### Stream top-K candidates (SSE)
 ```bash
-curl -N http://localhost:8000/sse/candidates
+curl -N http://localhost:8000/candidates/stream
+```
+
+### Active trade setups — last 120 min (REST)
+```bash
+curl http://localhost:8000/setups
+```
+
+### Stream trade setups in real-time (SSE)
+```bash
+curl -N http://localhost:8000/setups/stream
 ```
 
 ## Metrics overview (v1)

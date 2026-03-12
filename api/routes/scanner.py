@@ -1,18 +1,36 @@
-"""SSE route handlers."""
+"""Scanner job route handlers (market snapshots and candidates)."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from api.models import MarketSnapshot, SymbolMetrics
+from api.models import MarketSnapshot, SnapshotResponse, SymbolMetrics
 from api.store import redis_store
 
-router = APIRouter(tags=["SSE"])
+router = APIRouter(tags=["Scanner"])
+
+
+@router.get(
+    "/market",
+    summary="Get latest market snapshot",
+    description="""
+Returns the most recent market snapshot and candidate list in a single HTTP
+response. Use this for initial page load or non-streaming clients.
+
+Returns `null` for fields if the scanner has not run yet.
+""",
+    response_model=SnapshotResponse,
+    response_description="Latest market state and candidates",
+)
+async def snapshot_latest() -> SnapshotResponse:
+    market_state = await redis_store.get_json("market_state:latest")
+    candidates = await redis_store.get_json("market_state:candidates:latest")
+    return SnapshotResponse(market_state=market_state, candidates=candidates)
 
 
 def format_sse(payload: Optional[object]) -> str:
@@ -46,7 +64,7 @@ async def stream_key(key: str) -> AsyncGenerator[str, None]:
 
 
 @router.get(
-    "/sse/market",
+    "/market/stream",
     summary="Stream full market snapshots",
     description="""
 Server-Sent Events stream that emits a new **MarketSnapshot** JSON payload
@@ -78,7 +96,7 @@ async def sse_market() -> StreamingResponse:
 
 
 @router.get(
-    "/sse/candidates",
+    "/candidates/stream",
     summary="Stream top candidate symbols",
     description="""
 Server-Sent Events stream that emits the updated **top-K candidate list**
