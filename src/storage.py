@@ -121,6 +121,13 @@ class AsyncRedisStore:
             return None
         return json.loads(data)
 
+    async def set_json(self, key: str, payload: Any, ex: Optional[int] = None) -> None:
+        data = json.dumps(payload, separators=(",", ":"))
+        if ex is None:
+            await self._client.set(key, data)
+            return
+        await self._client.set(key, data, ex=ex)
+
     async def get_recent_signals(
         self, key: str, max_age_seconds: int = 7200, max_items: int = 100
     ) -> List[Any]:
@@ -164,3 +171,19 @@ class MongoStore:
         collection = self._db["market_state_snapshots"]
         result = collection.insert_one(document)
         return str(result.inserted_id)
+
+    def find(
+        self,
+        collection: str,
+        query: Optional[Dict[str, Any]] = None,
+        projection: Optional[Dict[str, Any]] = None,
+        sort: Optional[List[tuple[str, int]]] = None,
+        limit: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Find documents matching query."""
+        cursor = self._db[collection].find(query or {}, projection)
+        if sort:
+            cursor = cursor.sort(sort)
+        if limit > 0:
+            cursor = cursor.limit(limit)
+        return list(cursor)

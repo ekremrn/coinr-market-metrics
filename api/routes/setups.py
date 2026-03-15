@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, List
 
 from fastapi import APIRouter
@@ -11,12 +12,40 @@ from fastapi.responses import StreamingResponse
 
 from api.models import TradeSetup
 from api.store import redis_store
+from src.config import MongoConfig, SETUPS_MONGO_DB
+from src.storage import MongoStore
 
 router = APIRouter(tags=["Setups"])
 
 _SIGNALS_KEY = "coinr:trade_signals:recent"
 _EVENTS_CHANNEL = "coinr:trade_signals:events"
 _SIGNAL_TTL_SECONDS = 7200  # 120 minutes
+_HISTORY_WINDOW_HOURS = 48
+_HISTORY_CACHE_KEY = "history:setups:48h:v1"
+_HISTORY_CACHE_TTL_SECONDS = 300
+
+
+def _serialize_position(position: dict) -> dict:
+    payload = dict(position)
+    timestamp = payload.get("timestamp")
+    if isinstance(timestamp, datetime):
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        payload["timestamp"] = timestamp.isoformat()
+    return payload
+
+
+def _load_setup_history() -> list[dict]:
+    base_mongo_cfg = MongoConfig()
+    setups_mongo_cfg = MongoConfig(uri=base_mongo_cfg.uri, database=SETUPS_MONGO_DB)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_HISTORY_WINDOW_HOURS)
+    store = MongoStore(setups_mongo_cfg)
+    return store.find(
+        "analyses",
+        query={"timestamp": {"$gte": cutoff}, "position": {"$ne": None}},
+        projection={"_id": 0, "position": 1},
+        sort=[("timestamp", -1)],
+    )
 
 
 def _format_sse(payload: object) -> str:
@@ -88,3 +117,33 @@ async def sse_setups() -> StreamingResponse:
 )
 async def setups_active() -> list:
     return await redis_store.get_recent_signals(_SIGNALS_KEY, _SIGNAL_TTL_SECONDS)
+
+
+@router.get(
+    "/setups/history",
+    summary="Get setup history for the last 48 hours",
+    description="""
+Returns historical trade setups from the last 48 hours, newest first.
+
+Only analysis records with a non-null `position` are included. Each item is
+returned as a `TradeSetup` payload without the outer analysis envelope.
+""",
+    response_model=List[TradeSetup],
+)
+async def setups_history() -> list[TradeSetup]:
+    cached = await redis_store.get_json(_HISTORY_CACHE_KEY)
+    if cached is not None:
+        return [TradeSetup.model_validate(item) for item in cached]
+
+    history = await asyncio.to_thread(_load_setup_history)
+    payload = [
+        TradeSetup.model_validate(_serialize_position(item["position"]))
+        for item in history
+        if item.get("position") is not None
+    ]
+    await redis_store.set_json(
+        _HISTORY_CACHE_KEY,
+        [item.model_dump(mode="json") for item in payload],
+        ex=_HISTORY_CACHE_TTL_SECONDS,
+    )
+    return payload

@@ -31,9 +31,11 @@ docker compose -f docker-compose.yml run --rm market-scanner
 
 API:
 - `GET /market` – latest snapshot (REST)
+- `GET /market/history` – compact successful market snapshots from the last 48 hours
 - `GET /market/stream` – stream full market snapshot
 - `GET /candidates/stream` – stream candidate updates
 - `GET /setups` – active trade setups, last 120 min (REST)
+- `GET /setups/history` – historical trade setups from the last 48 hours
 - `GET /setups/stream` – stream trade setups
 
 Convenience:
@@ -45,6 +47,12 @@ Convenience:
 ```bash
 curl http://localhost:8000/market
 ```
+
+### Market history — last 48 hours (REST)
+```bash
+curl http://localhost:8000/market/history
+```
+Response is cached in Redis for 5 minutes.
 
 ### Stream full market snapshot (SSE)
 ```bash
@@ -60,6 +68,12 @@ curl -N http://localhost:8000/candidates/stream
 ```bash
 curl http://localhost:8000/setups
 ```
+
+### Setup history — last 48 hours (REST)
+```bash
+curl http://localhost:8000/setups/history
+```
+Response is cached in Redis for 5 minutes.
 
 ### Stream trade setups in real-time (SSE)
 ```bash
@@ -94,7 +108,9 @@ Coin metrics (per symbol in top N):
 - Storage:
   - Redis keys: `market_state:latest`, `market_state:symbols:latest`, `market_state:candidates:latest`
   - Pubsub: `market_state:events`
-  - MongoDB collection: `market_state_snapshots`
+  - Shared `MONGO_URI` is used for both Mongo connections
+  - Market snapshots are stored in hardcoded DB `coinr-market-metrics`, collection `market_state_snapshots`
+  - Historical setups are read from hardcoded DB `coinr`, collection `analyses`
 
 ## Cronjob example (every 15 minutes)
 If you want the task to run via cron and exit after completion, add a crontab entry like:

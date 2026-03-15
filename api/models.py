@@ -89,6 +89,14 @@ class SnapshotResponse(BaseModel):
     candidates: Optional[List[SymbolMetrics]] = Field(None, description="Top-K candidate symbols. Null if no scan has run yet.")
 
 
+class HistoricalMarketSnapshot(BaseModel):
+    """Compact historical market snapshot returned by the history endpoint."""
+
+    ts: str = Field(..., description="ISO-8601 UTC timestamp of the snapshot.")
+    ts_ms: int = Field(..., description="Unix timestamp in milliseconds.")
+    market: MarketState
+
+
 class TradeSetup(BaseModel):
     """Trade setup (position recommendation) produced by the analysis agent."""
 

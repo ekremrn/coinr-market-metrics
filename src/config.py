@@ -10,6 +10,9 @@ import os
 from dataclasses import dataclass, field
 from typing import Set
 
+MARKET_METRICS_MONGO_DB = "coinr-market-metrics"
+SETUPS_MONGO_DB = "coinr"
+
 
 def _csv_set(value: str) -> Set[str]:
     items = [item.strip().upper() for item in (value or "").split(",")]
@@ -32,7 +35,7 @@ class RedisConfig:
 class MongoConfig:
     """MongoDB connection configuration."""
     uri: str = field(default_factory=lambda: os.getenv("MONGO_URI", "mongodb://localhost:27017"))
-    database: str = field(default_factory=lambda: os.getenv("MONGO_DB") or "coinr-market-metrics")
+    database: str = field(default=MARKET_METRICS_MONGO_DB)
 
 
 @dataclass(frozen=True)

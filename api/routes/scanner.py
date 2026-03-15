@@ -4,15 +4,34 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from api.models import MarketSnapshot, SnapshotResponse, SymbolMetrics
+from api.models import HistoricalMarketSnapshot, MarketSnapshot, SnapshotResponse, SymbolMetrics
 from api.store import redis_store
+from src.config import MongoConfig
+from src.storage import MongoStore
 
 router = APIRouter(tags=["Scanner"])
+
+_HISTORY_WINDOW_HOURS = 48
+_HISTORY_CACHE_KEY = "history:market:48h:v1"
+_HISTORY_CACHE_TTL_SECONDS = 300
+
+
+def _load_market_history() -> list[dict]:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_HISTORY_WINDOW_HOURS)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+    store = MongoStore(MongoConfig())
+    return store.find(
+        "market_state_snapshots",
+        query={"ts_ms": {"$gte": cutoff_ms}, "status": "ok"},
+        projection={"_id": 0, "ts": 1, "ts_ms": 1, "market": 1},
+        sort=[("ts_ms", -1)],
+    )
 
 
 @router.get(
@@ -31,6 +50,28 @@ async def snapshot_latest() -> SnapshotResponse:
     market_state = await redis_store.get_json("market_state:latest")
     candidates = await redis_store.get_json("market_state:candidates:latest")
     return SnapshotResponse(market_state=market_state, candidates=candidates)
+
+
+@router.get(
+    "/market/history",
+    summary="Get market history for the last 48 hours",
+    description="""
+Returns compact market snapshots from the last 48 hours, newest first.
+
+Only successful snapshots (`status = "ok"`) are included. Each item contains
+only `ts`, `ts_ms`, and `market`.
+""",
+    response_model=list[HistoricalMarketSnapshot],
+    response_description="Compact market snapshots from the last 48 hours",
+)
+async def market_history() -> list[HistoricalMarketSnapshot]:
+    cached = await redis_store.get_json(_HISTORY_CACHE_KEY)
+    if cached is not None:
+        return [HistoricalMarketSnapshot.model_validate(item) for item in cached]
+
+    history = await asyncio.to_thread(_load_market_history)
+    await redis_store.set_json(_HISTORY_CACHE_KEY, history, ex=_HISTORY_CACHE_TTL_SECONDS)
+    return [HistoricalMarketSnapshot.model_validate(item) for item in history]
 
 
 def format_sse(payload: Optional[object]) -> str:
