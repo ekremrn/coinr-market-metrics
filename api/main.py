@@ -35,7 +35,7 @@ Real-time USDT-perpetual futures market metrics and AI-generated trade setups st
 - **Scanner** — REST snapshot + SSE streams for market state and top candidates.
 - **Scanner History** — REST access to compact successful market snapshots from the last 48 hours.
 - **Setups** — REST list + SSE stream for active AI-generated trade setups (last 120 min).
-- **Setups History** — REST access to historical trade setups from the last 48 hours.
+- **Setups History** — REST access to expired trade setups from the last 48 hours.
 
 ### Data freshness
 Market snapshots are produced every `SCAN_INTERVAL_MINUTES` (default 15 min).  

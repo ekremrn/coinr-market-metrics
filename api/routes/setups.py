@@ -35,6 +35,23 @@ def _serialize_position(position: dict) -> dict:
     return payload
 
 
+def _parse_timestamp(value: str) -> datetime | None:
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp
+
+
+def _is_expired_setup(setup: TradeSetup, now: datetime) -> bool:
+    timestamp = _parse_timestamp(setup.timestamp)
+    if timestamp is None:
+        return True
+    return timestamp + timedelta(minutes=max(setup.valid_for_minutes, 0)) <= now
+
+
 def _load_setup_history() -> list[dict]:
     base_mongo_cfg = MongoConfig()
     setups_mongo_cfg = MongoConfig(uri=base_mongo_cfg.uri, database=SETUPS_MONGO_DB)
@@ -123,9 +140,10 @@ async def setups_active() -> list:
     "/setups/history",
     summary="Get setup history for the last 48 hours",
     description="""
-Returns historical trade setups from the last 48 hours, newest first.
+Returns expired trade setups from the last 48 hours, newest first.
 
-Only analysis records with a non-null `position` are included. Each item is
+Only analysis records with a non-null `position` are included, and setups that
+are still within their `valid_for_minutes` window are excluded. Each item is
 returned as a `TradeSetup` payload without the outer analysis envelope.
 """,
     response_model=List[TradeSetup],
@@ -136,10 +154,13 @@ async def setups_history() -> list[TradeSetup]:
         return [TradeSetup.model_validate(item) for item in cached]
 
     history = await asyncio.to_thread(_load_setup_history)
+    now = datetime.now(timezone.utc)
     payload = [
-        TradeSetup.model_validate(_serialize_position(item["position"]))
+        setup
         for item in history
         if item.get("position") is not None
+        for setup in [TradeSetup.model_validate(_serialize_position(item["position"]))]
+        if _is_expired_setup(setup, now)
     ]
     await redis_store.set_json(
         _HISTORY_CACHE_KEY,

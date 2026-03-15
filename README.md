@@ -35,7 +35,7 @@ API:
 - `GET /market/stream` – stream full market snapshot
 - `GET /candidates/stream` – stream candidate updates
 - `GET /setups` – active trade setups, last 120 min (REST)
-- `GET /setups/history` – historical trade setups from the last 48 hours
+- `GET /setups/history` – expired trade setups from the last 48 hours
 - `GET /setups/stream` – stream trade setups
 
 Convenience:
@@ -69,7 +69,7 @@ curl -N http://localhost:8000/candidates/stream
 curl http://localhost:8000/setups
 ```
 
-### Setup history — last 48 hours (REST)
+### Setup history — expired setups from the last 48 hours (REST)
 ```bash
 curl http://localhost:8000/setups/history
 ```
