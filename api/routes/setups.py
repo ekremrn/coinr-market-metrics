@@ -17,7 +17,7 @@ from src.storage import MongoStore
 
 router = APIRouter(tags=["Setups"])
 
-_SIGNALS_KEY = "coinr:trade_signals:recent"
+_SIGNALS_KEY_PREFIX = "coinr:trade_signals:"
 _EVENTS_CHANNEL = "coinr:trade_signals:events"
 _SIGNAL_TTL_SECONDS = 7200  # 120 minutes
 _HISTORY_WINDOW_HOURS = 48
@@ -73,7 +73,7 @@ async def _stream_signals() -> AsyncGenerator[str, None]:
     q = await redis_store.subscribe(_EVENTS_CHANNEL)
     try:
         # Emit currently active signals immediately on connect
-        active = await redis_store.get_recent_signals(_SIGNALS_KEY, _SIGNAL_TTL_SECONDS)
+        active = await redis_store.get_recent_signals(_SIGNALS_KEY_PREFIX, _SIGNAL_TTL_SECONDS)
         for signal in active:
             yield _format_sse(signal)
 
@@ -133,7 +133,7 @@ async def sse_setups() -> StreamingResponse:
     response_model=List[TradeSetup],
 )
 async def setups_active() -> list:
-    return await redis_store.get_recent_signals(_SIGNALS_KEY, _SIGNAL_TTL_SECONDS)
+    return await redis_store.get_recent_signals(_SIGNALS_KEY_PREFIX, _SIGNAL_TTL_SECONDS)
 
 
 @router.get(

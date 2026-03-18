@@ -129,15 +129,23 @@ class AsyncRedisStore:
         await self._client.set(key, data, ex=ex)
 
     async def get_recent_signals(
-        self, key: str, max_age_seconds: int = 7200, max_items: int = 100
+        self, key_prefix: str, max_age_seconds: int = 7200
     ) -> List[Any]:
-        """LRANGE key, filter by timestamp age, return oldest-first."""
-        raw_items = await self._client.lrange(key, 0, max_items - 1)
+        """Scan keys matching key_prefix*, filter by age, return oldest-first.
+
+        TTL on each key already limits results; age filter is a safety net.
+        """
+        keys = [k async for k in self._client.scan_iter(f"{key_prefix}*")]
+        if not keys:
+            return []
+        raws = await self._client.mget(*keys)
         now = datetime.now(timezone.utc)
         result = []
-        for item in raw_items:
+        for raw in raws:
+            if raw is None:
+                continue
             try:
-                data = json.loads(item)
+                data = json.loads(raw)
                 ts_str = data.get("timestamp")
                 if ts_str:
                     ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
@@ -148,7 +156,7 @@ class AsyncRedisStore:
                 result.append(data)
             except (json.JSONDecodeError, TypeError, ValueError):
                 continue
-        result.reverse()  # oldest first
+        result.sort(key=lambda d: d.get("timestamp", ""))  # oldest first
         return result
 
     async def close(self) -> None:
