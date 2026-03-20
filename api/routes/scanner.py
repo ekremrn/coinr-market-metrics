@@ -18,7 +18,7 @@ from src.storage import MongoStore
 router = APIRouter(tags=["Scanner"])
 
 _HISTORY_WINDOW_HOURS = 48
-_HISTORY_CACHE_KEY = "history:market:48h:v1"
+_HISTORY_CACHE_KEY = "history:market:48h:v1.1"
 _HISTORY_CACHE_TTL_SECONDS = 300
 
 

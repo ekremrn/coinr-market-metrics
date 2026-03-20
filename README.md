@@ -80,10 +80,10 @@ Response is cached in Redis for 5 minutes.
 curl -N http://localhost:8000/setups/stream
 ```
 
-## Metrics overview (v1)
+## Metrics overview (v1.1)
 Market metrics (all normalized 0..1 or categorical):
-- `tradeability_score`: mean ADX(15m), 0 at <=22, 1 at >=30
-- `chop_score`: clamp(chop_ratio / 0.5)
+- `tradeability_score`: composite of trend breadth, direction consensus, liquidity health, volatility usability, and taker alignment
+- `chop_score`: composite of low-ADX share, direction dispersion, and taker conflict share
 - `market_regime`: OFF / SELECTIVE / TRENDING
 - `btc_direction_1h`: EMA9 vs EMA21
 - `btc_trend_strength`: ADX(1h), 0 at <=20, 1 at >=35
@@ -96,6 +96,10 @@ Market metrics (all normalized 0..1 or categorical):
 - `recommended_mode`: OFF / SHORT_ONLY / LONG_ONLY / SELECTIVE
 - `funding_rate_avg_8h`: average of latest funding rates across universe, normalized from -0.003..0.003 to [0,1]
 - `funding_rate_direction`: positive / negative / neutral
+- `regime_detail`: TREND / TREND_PULLBACK / TREND_EXTENSION / CHOP / EXPANSION / EXHAUSTION / MIXED
+- `long_environment_score`, `short_environment_score`: aggregate side-specific tape quality
+- `breakout_failure_risk`: market-level probability that continuation breaks down quickly
+- `market_diagnostic_tags`: free-form diagnostics for the current tape
 
 Coin metrics (per symbol in top N):
 - `dir_1h`, `dir_15m`: EMA9 vs EMA21
@@ -103,6 +107,12 @@ Coin metrics (per symbol in top N):
 - `spread_bps`, `taker_dominance_15m`
 - `liquidity_score`, `trend_score`, `attractiveness_score`
 - `flags`: lightweight explanations
+- `relative_strength_score`: normalized BTC-relative strength
+- `extension_score`: EMA/range/ATR-based stretch score
+- `fakeout_risk`: quick-failure risk for the current move
+- `execution_cost_score`: spread + volatility usability score
+- `long_score`, `short_score`: side-specific setup quality
+- `regime_label`, `diagnostic_tags`: richer symbol context without changing compatibility flags
 
 ## Notes
 - Storage:

@@ -13,6 +13,7 @@ CorrelationRegime = Literal["COUPLED", "MIXED", "DECOUPLED"]
 RecommendedMode = Literal["LONG_ONLY", "SHORT_ONLY", "SELECTIVE", "OFF"]
 TakerDominance = Literal["buy_dominant", "sell_dominant", "neutral"]
 SymbolFlag = Literal["adx15_low", "high_spread", "volume_weak", "taker_conflict"]
+RegimeDetail = Literal["TREND", "TREND_PULLBACK", "TREND_EXTENSION", "CHOP", "EXPANSION", "EXHAUSTION", "MIXED"]
 
 
 class MarketState(BaseModel):
@@ -41,6 +42,11 @@ class MarketState(BaseModel):
 
     adx15_mean: float = Field(..., description="Raw mean ADX (14) across all 15m series.")
     chop_ratio: float = Field(..., ge=0, le=1, description="Ratio of symbols with ADX < 22.")
+    regime_detail: Optional[RegimeDetail] = Field(None, description="Higher-resolution regime label for the current tape.")
+    long_environment_score: Optional[float] = Field(None, ge=0, le=1, description="Aggregate quality score for long-side conditions.")
+    short_environment_score: Optional[float] = Field(None, ge=0, le=1, description="Aggregate quality score for short-side conditions.")
+    breakout_failure_risk: Optional[float] = Field(None, ge=0, le=1, description="Estimated risk of failed breakouts and fast reversals.")
+    market_diagnostic_tags: List[str] = Field(default_factory=list, description="Human-readable diagnostic tags for tape quality and edge concentration.")
 
 
 class SymbolMetrics(BaseModel):
@@ -58,6 +64,14 @@ class SymbolMetrics(BaseModel):
     trend_score: float = Field(..., ge=0, le=1, description="ADX-derived trend score [0–1].")
     attractiveness_score: float = Field(..., ge=0, le=1, description="Composite candidate attractiveness score [0–1].")
     flags: List[SymbolFlag] = Field(default_factory=list, description="Warning flags: adx15_low, high_spread, volume_weak, taker_conflict.")
+    relative_strength_score: Optional[float] = Field(None, ge=0, le=1, description="Relative performance score vs BTC. >0.5 = outperforming BTC.")
+    extension_score: Optional[float] = Field(None, ge=0, le=1, description="Stretch score based on EMA distance, ATR, and recent range position.")
+    fakeout_risk: Optional[float] = Field(None, ge=0, le=1, description="Estimated risk that the current move fails quickly.")
+    execution_cost_score: Optional[float] = Field(None, ge=0, le=1, description="Execution friendliness score from spread and volatility usability.")
+    long_score: Optional[float] = Field(None, ge=0, le=1, description="Long-side setup quality score for the symbol.")
+    short_score: Optional[float] = Field(None, ge=0, le=1, description="Short-side setup quality score for the symbol.")
+    regime_label: Optional[RegimeDetail] = Field(None, description="Higher-resolution symbol regime label.")
+    diagnostic_tags: List[str] = Field(default_factory=list, description="Human-readable symbol diagnostics kept separate from compatibility flags.")
 
 
 class UniverseInfo(BaseModel):

@@ -207,13 +207,15 @@ def compute_features_and_metrics(
 
     # Build market-level metrics
     market, btc_direction = build_market_metrics(features)
+    feature_map = {feature["symbol"]: feature for feature in features}
+    btc_feature = feature_map.get("BTCUSDT")
 
     # Build symbol-level metrics for universe symbols only
     symbol_metrics: List[Dict[str, Any]] = []
     for feature in features:
         if feature.get("symbol") not in market_data.universe_symbols:
             continue
-        symbol_metrics.append(build_symbol_metrics(feature, btc_direction))
+        symbol_metrics.append(build_symbol_metrics(feature, btc_direction, btc_feature))
 
     return market, symbol_metrics, features
 
