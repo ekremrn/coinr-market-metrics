@@ -19,6 +19,8 @@ def test_setups_history_ignores_still_valid_setups(monkeypatch):
         assert ex == 300
         assert len(payload) == 1
         assert payload[0]["symbol"] == "ETHUSDT"
+        assert payload[0]["decision_context"]["decision_stage"] == "REVIEWED_ACCEPT"
+        assert payload[0]["review"]["grade"] == "B"
 
     def fake_load_setup_history():
         return [
@@ -31,6 +33,8 @@ def test_setups_history_ignores_still_valid_setups(monkeypatch):
                     "take_profit_prices": [66000.0],
                     "valid_for_minutes": 60,
                     "notes": ["still valid"],
+                    "decision_context": {"decision_stage": "HARD_ACCEPT"},
+                    "review": {"grade": "A"},
                     "timestamp": (now - timedelta(minutes=10)).isoformat(),
                 }
             },
@@ -43,6 +47,16 @@ def test_setups_history_ignores_still_valid_setups(monkeypatch):
                     "take_profit_prices": [3100.0],
                     "valid_for_minutes": 60,
                     "notes": ["expired"],
+                    "decision_context": {
+                        "decision_stage": "REVIEWED_ACCEPT",
+                        "market_metrics": {
+                            "snapshot_ts": (now - timedelta(minutes=91)).isoformat(),
+                        },
+                    },
+                    "review": {
+                        "grade": "B",
+                        "confidence": 0.63,
+                    },
                     "timestamp": (now - timedelta(minutes=90)).isoformat(),
                 }
             },
@@ -64,6 +78,16 @@ def test_setups_history_ignores_still_valid_setups(monkeypatch):
             "take_profit_prices": [3100.0],
             "valid_for_minutes": 60,
             "notes": ["expired"],
+            "decision_context": {
+                "decision_stage": "REVIEWED_ACCEPT",
+                "market_metrics": {
+                    "snapshot_ts": (now - timedelta(minutes=91)).isoformat(),
+                },
+            },
+            "review": {
+                "grade": "B",
+                "confidence": 0.63,
+            },
             "timestamp": (now - timedelta(minutes=90)).isoformat(),
         }
     ]
