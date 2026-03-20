@@ -21,8 +21,9 @@ _SIGNALS_KEY_PREFIX = "coinr:trade_signals:"
 _EVENTS_CHANNEL = "coinr:trade_signals:events"
 _SIGNAL_TTL_SECONDS = 7200  # 120 minutes
 _HISTORY_WINDOW_HOURS = 48
-_HISTORY_CACHE_KEY = "history:setups:48h:v1"
+_HISTORY_CACHE_KEY = "history:setups:48h:v2"
 _HISTORY_CACHE_TTL_SECONDS = 300
+_ACCEPTED_DECISION_STAGES = ("HARD_ACCEPT", "REVIEWED_ACCEPT")
 
 
 def _serialize_position(position: dict) -> dict:
@@ -59,7 +60,14 @@ def _load_setup_history() -> list[dict]:
     store = MongoStore(setups_mongo_cfg)
     return store.find(
         "analyses",
-        query={"timestamp": {"$gte": cutoff}, "position": {"$ne": None}},
+        query={
+            "timestamp": {"$gte": cutoff},
+            "position": {"$ne": None},
+            "$or": [
+                {"decision_stage": {"$in": list(_ACCEPTED_DECISION_STAGES)}},
+                {"decision_stage": {"$exists": False}},
+            ],
+        },
         projection={"_id": 0, "position": 1},
         sort=[("timestamp", -1)],
     )
@@ -142,9 +150,11 @@ async def setups_active() -> list:
     description="""
 Returns expired trade setups from the last 48 hours, newest first.
 
-Only analysis records with a non-null `position` are included, and setups that
-are still within their `valid_for_minutes` window are excluded. Each item is
-returned as a `TradeSetup` payload without the outer analysis envelope.
+Only accepted analysis records with a non-null `position` are included, and
+setups that are still within their `valid_for_minutes` window are excluded.
+Legacy records without `decision_stage` are still included for backward
+compatibility. Each item is returned as a `TradeSetup` payload without the
+outer analysis envelope.
 """,
     response_model=List[TradeSetup],
 )
