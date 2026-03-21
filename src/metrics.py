@@ -813,16 +813,16 @@ def build_market_metrics(
     )
     taker_alignment = 1.0 - taker_conflict_share
 
-    tradeability_base = (
+    # volume_health has additive weight 0.28 — no multiplicative penalty on top,
+    # which previously caused quadratic over-weighting and made the OFF regime
+    # overly sticky during low-activity sessions.
+    tradeability_score = clamp(
         0.22 * trend_breadth
         + 0.14 * direction_consensus_mean
         + 0.16 * liquidity_health
         + 0.10 * volatility_usability
         + 0.10 * taker_alignment
-        + 0.28 * volume_health
-    )
-    tradeability_score = clamp(
-        tradeability_base * (0.70 + 0.30 * volume_health),
+        + 0.28 * volume_health,
         0.0,
         1.0,
     )
@@ -885,8 +885,15 @@ def build_market_metrics(
         1.0,
     )
 
-    btc_bullish_support = 1.0 if btc_direction == "bullish" else 0.5 if btc_direction == "neutral" else 0.0
-    btc_bearish_support = 1.0 if btc_direction == "bearish" else 0.5 if btc_direction == "neutral" else 0.0
+    # Weight directional BTC signal by trend strength to prevent whipsaw flips
+    # when EMA9/EMA21 crosses in a weak/choppy BTC market. btc_trend_strength is
+    # normalize_range(adx_1h, 20, 35): 0 at ADX<20, 1.0 at ADX>35.
+    # At minimum we apply 30% of the raw directional signal so some bias is kept.
+    _btc_strength = max(btc_trend_strength if btc_trend_strength is not None else 0.3, 0.3)
+    _btc_base_bull = 1.0 if btc_direction == "bullish" else 0.5 if btc_direction == "neutral" else 0.0
+    _btc_base_bear = 1.0 if btc_direction == "bearish" else 0.5 if btc_direction == "neutral" else 0.0
+    btc_bullish_support = 0.5 + (_btc_base_bull - 0.5) * _btc_strength
+    btc_bearish_support = 0.5 + (_btc_base_bear - 0.5) * _btc_strength
     mean_long_score = weighted_mean(long_scores, alt_weights, 0.0)
     mean_short_score = weighted_mean(short_scores, alt_weights, 0.0)
     long_environment_score = clamp(
