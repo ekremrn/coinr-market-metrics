@@ -143,6 +143,22 @@ def normalize_symmetric(value: Optional[float], max_abs: float) -> float:
     return clamp((value + max_abs) / (2 * max_abs), 0.0, 1.0)
 
 
+def weighted_mean(values: List[Optional[float]], weights: List[float], default: float = 0.0) -> float:
+    numerator = 0.0
+    denominator = 0.0
+    for value, weight in zip(values, weights):
+        if value is None:
+            continue
+        safe_weight = max(float(weight), 0.0)
+        if safe_weight <= 0:
+            continue
+        numerator += float(value) * safe_weight
+        denominator += safe_weight
+    if denominator <= 0:
+        return default
+    return numerator / denominator
+
+
 def volatility_band_score(atrp: Optional[float]) -> float:
     if atrp is None:
         return 0.0
@@ -306,6 +322,13 @@ def execution_cost_score_from_feature(feature: Dict[str, Any]) -> float:
     return clamp(0.7 * liquidity + 0.3 * volatility_usable, 0.0, 1.0)
 
 
+def market_feature_weight(feature: Dict[str, Any]) -> float:
+    liquidity = liquidity_score_from_spread(feature.get("spread_bps"))
+    volume_confirmation = clamp(feature.get("volume_confirmation_15m", 0.0), 0.0, 1.0)
+    trend_score = normalize_range(feature.get("adx_15m"), 22.0, 35.0)
+    return clamp(0.20 + 0.35 * liquidity + 0.30 * volume_confirmation + 0.15 * trend_score, 0.10, 1.0)
+
+
 def extension_score_from_feature(feature: Dict[str, Any]) -> float:
     ema_distance_atr = feature.get("ema_distance_atr_15m")
     range_position = feature.get("range_position_15m")
@@ -328,11 +351,11 @@ def fakeout_risk_from_feature(
     taker_conflict = 1.0 if feature.get("taker_conflict_15m") else 0.0
     weak_volume = 1.0 - clamp(feature.get("volume_confirmation_15m", 0.0), 0.0, 1.0)
     return clamp(
-        0.25 * local_chop
-        + 0.25 * taker_conflict
-        + 0.20 * weak_volume
-        + 0.20 * extension_score
-        + 0.10 * (1.0 - execution_cost_score),
+        0.18 * local_chop
+        + 0.24 * taker_conflict
+        + 0.28 * weak_volume
+        + 0.15 * extension_score
+        + 0.15 * (1.0 - execution_cost_score),
         0.0,
         1.0,
     )
@@ -374,17 +397,30 @@ def side_score_from_feature(
     dominance = dominance_score_for_side(feature.get("taker_dominance_15m", "neutral"), side)
     relative = 0.5 if relative_strength_score is None else relative_strength_score
     relative_side = relative if side == "long" else 1.0 - relative
+    trend_score = normalize_range(feature.get("adx_15m"), 22.0, 35.0)
+    consensus = clamp(feature.get("direction_consensus", 0.5), 0.0, 1.0)
+    volume_confirmation = clamp(feature.get("volume_confirmation_15m", 0.0), 0.0, 1.0)
 
-    return clamp(
-        0.25 * dir_alignment
-        + 0.15 * dominance
-        + 0.20 * relative_side
-        + 0.15 * (1.0 - extension_score)
-        + 0.15 * (1.0 - fakeout_risk)
-        + 0.10 * execution_cost_score,
+    score = clamp(
+        0.18 * dir_alignment
+        + 0.10 * dominance
+        + 0.16 * relative_side
+        + 0.12 * (1.0 - extension_score)
+        + 0.14 * (1.0 - fakeout_risk)
+        + 0.10 * execution_cost_score
+        + 0.10 * volume_confirmation
+        + 0.05 * trend_score
+        + 0.05 * consensus,
         0.0,
         1.0,
     )
+
+    if volume_confirmation < 0.20:
+        score *= 0.78
+    if trend_score < 0.40 and consensus < 0.70:
+        score *= 0.82
+
+    return clamp(score, 0.0, 1.0)
 
 
 def determine_symbol_regime_label(
@@ -674,10 +710,15 @@ def build_market_metrics(
 ) -> Tuple[Dict[str, Any], str]:
     feature_map = {item["symbol"]: item for item in features}
     btc = feature_map.get(btc_symbol)
+    feature_weights = [market_feature_weight(item) for item in features]
 
     adx_values = [item.get("adx_15m") for item in features if item.get("adx_15m") is not None]
     adx_mean = float(np.mean(adx_values)) if adx_values else 0.0
-    low_adx_share = sum(1 for value in adx_values if value < 22) / len(adx_values) if adx_values else 0.0
+    low_adx_share = weighted_mean(
+        [1.0 if item.get("adx_15m") is not None and item.get("adx_15m") < 22 else 0.0 for item in features],
+        feature_weights,
+        0.0,
+    )
 
     btc_direction = btc.get("dir_1h") if btc else "neutral"
     btc_trend_strength = normalize_range(btc.get("adx_1h") if btc else None, 20.0, 35.0)
@@ -685,11 +726,21 @@ def build_market_metrics(
     alt_features = [item for item in features if item.get("symbol") != btc_symbol]
     if not alt_features:
         alt_features = features
+    alt_weights = [market_feature_weight(item) for item in alt_features]
 
-    alt_dirs = [item.get("dir_15m", "neutral") for item in alt_features]
-    total_alts = len(alt_dirs)
-    bull_ratio = alt_dirs.count("bullish") / total_alts if total_alts else 0.0
-    bear_ratio = alt_dirs.count("bearish") / total_alts if total_alts else 0.0
+    total_alt_weight = sum(alt_weights)
+    bull_ratio = (
+        sum(weight for item, weight in zip(alt_features, alt_weights) if item.get("dir_15m", "neutral") == "bullish")
+        / total_alt_weight
+        if total_alt_weight
+        else 0.0
+    )
+    bear_ratio = (
+        sum(weight for item, weight in zip(alt_features, alt_weights) if item.get("dir_15m", "neutral") == "bearish")
+        / total_alt_weight
+        if total_alt_weight
+        else 0.0
+    )
     alt_bias = clamp(0.5 + 0.5 * (bull_ratio - bear_ratio), 0.0, 1.0)
 
     btc_returns = btc.get("returns_1h") if btc else None
@@ -721,7 +772,7 @@ def build_market_metrics(
         volatility_regime = "NORMAL"
 
     vol_scores = [volume_score(item.get("vol_ratio_15m")) for item in features]
-    volume_health = float(np.mean(vol_scores)) if vol_scores else 0.0
+    volume_health = weighted_mean(vol_scores, feature_weights, 0.0)
 
     funding_rates = [
         item.get("funding_rate") for item in features if item.get("funding_rate") is not None
@@ -735,31 +786,43 @@ def build_market_metrics(
     else:
         funding_rate_direction = "negative"
 
-    trend_breadth = sum(
-        1
-        for item in features
-        if (item.get("adx_15m") or 0) >= 22 and item.get("dir_15m") != "neutral"
-    ) / len(features) if features else 0.0
-    direction_consensus_mean = float(
-        np.mean([item.get("direction_consensus", 0.5) for item in features])
-    ) if features else 0.0
-    liquidity_health = float(
-        np.mean([liquidity_score_from_spread(item.get("spread_bps")) for item in features])
-    ) if features else 0.0
-    volatility_usability = float(
-        np.mean([volatility_band_score(item.get("atrp_15m")) for item in features])
-    ) if features else 0.0
-    taker_conflict_share = float(
-        np.mean([1.0 if item.get("taker_conflict_15m") else 0.0 for item in features])
-    ) if features else 0.0
+    trend_breadth = weighted_mean(
+        [1.0 if (item.get("adx_15m") or 0) >= 22 and item.get("dir_15m") != "neutral" else 0.0 for item in features],
+        feature_weights,
+        0.0,
+    )
+    direction_consensus_mean = weighted_mean(
+        [item.get("direction_consensus", 0.5) for item in features],
+        feature_weights,
+        0.0,
+    )
+    liquidity_health = weighted_mean(
+        [liquidity_score_from_spread(item.get("spread_bps")) for item in features],
+        feature_weights,
+        0.0,
+    )
+    volatility_usability = weighted_mean(
+        [volatility_band_score(item.get("atrp_15m")) for item in features],
+        feature_weights,
+        0.0,
+    )
+    taker_conflict_share = weighted_mean(
+        [1.0 if item.get("taker_conflict_15m") else 0.0 for item in features],
+        feature_weights,
+        0.0,
+    )
     taker_alignment = 1.0 - taker_conflict_share
 
+    tradeability_base = (
+        0.22 * trend_breadth
+        + 0.14 * direction_consensus_mean
+        + 0.16 * liquidity_health
+        + 0.10 * volatility_usability
+        + 0.10 * taker_alignment
+        + 0.28 * volume_health
+    )
     tradeability_score = clamp(
-        0.30 * trend_breadth
-        + 0.20 * direction_consensus_mean
-        + 0.20 * liquidity_health
-        + 0.15 * volatility_usability
-        + 0.15 * taker_alignment,
+        tradeability_base * (0.70 + 0.30 * volume_health),
         0.0,
         1.0,
     )
@@ -771,9 +834,10 @@ def build_market_metrics(
         direction_dispersion = 1.0
 
     chop_score = clamp(
-        0.45 * low_adx_share
-        + 0.30 * direction_dispersion
-        + 0.25 * taker_conflict_share,
+        0.28 * low_adx_share
+        + 0.22 * direction_dispersion
+        + 0.18 * taker_conflict_share
+        + 0.32 * (1.0 - volume_health),
         0.0,
         1.0,
     )
@@ -810,51 +874,73 @@ def build_market_metrics(
             )
         )
 
-    extension_mean = float(np.mean(extension_values)) if extension_values else 0.0
-    fakeout_mean = float(np.mean(fakeout_values)) if fakeout_values else 0.0
+    extension_mean = weighted_mean(extension_values, alt_weights, 0.0)
+    fakeout_mean = weighted_mean(fakeout_values, alt_weights, 0.0)
     breakout_failure_risk = clamp(
-        0.35 * fakeout_mean
-        + 0.25 * extension_mean
+        0.28 * fakeout_mean
+        + 0.17 * extension_mean
         + 0.20 * taker_conflict_share
-        + 0.20 * (1.0 - volume_health),
+        + 0.35 * (1.0 - volume_health),
         0.0,
         1.0,
     )
 
     btc_bullish_support = 1.0 if btc_direction == "bullish" else 0.5 if btc_direction == "neutral" else 0.0
     btc_bearish_support = 1.0 if btc_direction == "bearish" else 0.5 if btc_direction == "neutral" else 0.0
-    mean_long_score = float(np.mean(long_scores)) if long_scores else 0.0
-    mean_short_score = float(np.mean(short_scores)) if short_scores else 0.0
+    mean_long_score = weighted_mean(long_scores, alt_weights, 0.0)
+    mean_short_score = weighted_mean(short_scores, alt_weights, 0.0)
     long_environment_score = clamp(
-        0.55 * mean_long_score
-        + 0.20 * btc_bullish_support
-        + 0.15 * alt_bias
-        + 0.10 * (1.0 - breakout_failure_risk),
+        0.42 * mean_long_score
+        + 0.14 * btc_bullish_support
+        + 0.08 * alt_bias
+        + 0.18 * volume_health
+        + 0.18 * (1.0 - breakout_failure_risk),
         0.0,
         1.0,
     )
     short_environment_score = clamp(
-        0.55 * mean_short_score
-        + 0.20 * btc_bearish_support
-        + 0.15 * (1.0 - alt_bias)
-        + 0.10 * (1.0 - breakout_failure_risk),
+        0.42 * mean_short_score
+        + 0.14 * btc_bearish_support
+        + 0.08 * (1.0 - alt_bias)
+        + 0.18 * volume_health
+        + 0.18 * (1.0 - breakout_failure_risk),
         0.0,
         1.0,
     )
 
     market_regime = "SELECTIVE"
-    if tradeability_score < 0.42 or chop_score > 0.68 or max(long_environment_score, short_environment_score) < 0.48:
+    if (
+        tradeability_score < 0.50
+        or chop_score > 0.62
+        or volume_health < 0.12
+        or breakout_failure_risk > 0.58
+        or max(long_environment_score, short_environment_score) < 0.50
+    ):
         market_regime = "OFF"
-    elif tradeability_score > 0.64 and breakout_failure_risk < 0.52 and max(long_environment_score, short_environment_score) > 0.58:
+    elif (
+        tradeability_score > 0.62
+        and chop_score < 0.55
+        and volume_health > 0.18
+        and breakout_failure_risk < 0.45
+        and max(long_environment_score, short_environment_score) > 0.60
+    ):
         market_regime = "TRENDING"
 
     recommended_mode = "SELECTIVE"
     if market_regime == "OFF":
         recommended_mode = "OFF"
-    elif long_environment_score - short_environment_score >= 0.12 and long_environment_score >= 0.58:
-        recommended_mode = "LONG_ONLY"
-    elif short_environment_score - long_environment_score >= 0.12 and short_environment_score >= 0.58:
-        recommended_mode = "SHORT_ONLY"
+    else:
+        directional_only_blocked = (
+            volume_health < 0.18
+            or breakout_failure_risk > 0.42
+            or chop_score > 0.58
+            or tradeability_score < 0.60
+        )
+        if not directional_only_blocked:
+            if long_environment_score - short_environment_score >= 0.18 and long_environment_score >= 0.62:
+                recommended_mode = "LONG_ONLY"
+            elif short_environment_score - long_environment_score >= 0.18 and short_environment_score >= 0.62:
+                recommended_mode = "SHORT_ONLY"
 
     regime_detail = determine_market_regime_detail(
         tradeability_score,

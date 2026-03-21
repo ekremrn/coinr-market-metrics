@@ -148,7 +148,7 @@ def test_build_market_metrics_detects_bullish_trend_environment():
 
     assert market["market_regime"] == "TRENDING"
     assert market["recommended_mode"] == "LONG_ONLY"
-    assert market["tradeability_score"] > 0.65
+    assert market["tradeability_score"] > 0.62
     assert market["long_environment_score"] > market["short_environment_score"]
     assert market["breakout_failure_risk"] < 0.55
     assert market["regime_detail"] in {"TREND", "TREND_PULLBACK", "TREND_EXTENSION"}
@@ -188,7 +188,7 @@ def test_build_market_metrics_detects_bearish_trend_environment():
     assert market["market_regime"] == "TRENDING"
     assert market["recommended_mode"] == "SHORT_ONLY"
     assert market["short_environment_score"] > market["long_environment_score"]
-    assert market["tradeability_score"] > 0.65
+    assert market["tradeability_score"] > 0.62
 
 
 def test_build_market_metrics_detects_chop_environment():
@@ -260,6 +260,41 @@ def test_build_market_metrics_detects_exhaustion_environment():
     assert market["breakout_failure_risk"] > 0.6
     assert market["regime_detail"] == "EXHAUSTION"
     assert "breakout_failure_elevated" in market["market_diagnostic_tags"]
+
+
+def test_build_market_metrics_does_not_emit_directional_only_mode_on_thin_tape():
+    btc = make_feature(
+        "BTCUSDT",
+        dir_1h="bullish",
+        dir_15m="bullish",
+        adx_15m=33.0,
+        taker_dominance_15m="buy_dominant",
+        direction_consensus=0.90,
+        volume_confirmation_15m=0.08,
+        vol_ratio_15m=0.9,
+    )
+    alts = [
+        make_feature(
+            f"ALT{i}USDT",
+            dir_1h="bullish",
+            dir_15m="bullish",
+            adx_15m=29.0 + i,
+            taker_dominance_15m="buy_dominant",
+            direction_consensus=0.84,
+            volume_confirmation_15m=0.08,
+            vol_ratio_15m=0.9,
+            spread_bps=3.0,
+            return_15m_4=0.012,
+            return_1h_6=0.026,
+        )
+        for i in range(4)
+    ]
+
+    market, _ = build_market_metrics([btc, *alts])
+
+    assert market["volume_health_15m"] < 0.12
+    assert market["recommended_mode"] in {"OFF", "SELECTIVE"}
+    assert market["recommended_mode"] != "LONG_ONLY"
 
 
 def test_build_symbol_metrics_adds_relative_strength_and_side_scores():
@@ -382,6 +417,52 @@ def test_build_symbol_metrics_can_prefer_short_without_changing_attractiveness_o
 
     assert metrics["short_score"] > metrics["long_score"]
     assert 0.0 <= metrics["attractiveness_score"] <= 1.0
+
+
+def test_build_symbol_metrics_penalizes_thin_volume_even_when_direction_aligns():
+    btc = make_feature(
+        "BTCUSDT",
+        dir_1h="bullish",
+        dir_15m="bullish",
+        adx_15m=30.0,
+        return_15m_4=0.01,
+        return_1h_6=0.02,
+        volume_confirmation_15m=0.8,
+        vol_ratio_15m=1.4,
+    )
+    clean = build_symbol_metrics(
+        make_feature(
+            "ETHUSDT",
+            dir_1h="bullish",
+            dir_15m="bullish",
+            adx_15m=29.0,
+            taker_dominance_15m="buy_dominant",
+            direction_consensus=0.88,
+            volume_confirmation_15m=0.78,
+            vol_ratio_15m=1.4,
+            spread_bps=2.0,
+        ),
+        "bullish",
+        btc,
+    )
+    thin = build_symbol_metrics(
+        make_feature(
+            "ETHUSDT",
+            dir_1h="bullish",
+            dir_15m="bullish",
+            adx_15m=29.0,
+            taker_dominance_15m="buy_dominant",
+            direction_consensus=0.88,
+            volume_confirmation_15m=0.08,
+            vol_ratio_15m=0.9,
+            spread_bps=2.0,
+        ),
+        "bullish",
+        btc,
+    )
+
+    assert clean["long_score"] > thin["long_score"]
+    assert clean["fakeout_risk"] < thin["fakeout_risk"]
 
 
 def test_select_candidates_preserves_attractiveness_ranking():
