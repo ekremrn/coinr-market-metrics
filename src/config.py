@@ -61,3 +61,15 @@ class AppConfig:
     include_symbols_in_mongo: bool = field(
         default_factory=lambda: os.getenv("INCLUDE_SYMBOLS_IN_MONGO", "false").lower() == "true"
     )
+    # Universe quality gates — filter out wash-traded / illiquid tokens before
+    # they distort market-level metrics (atrp_mean, volume_health, regime).
+    # min_quote_volume: minimum 24h notional volume in USD (default $100M).
+    # max_spread_bps: maximum bid/ask spread in basis points (default 3.5 bps).
+    # Tokens exceeding max_spread_bps are excluded even if volume is high,
+    # catching wash-traded meme tokens with inflated turnover.
+    min_quote_volume: float = field(
+        default_factory=lambda: float(os.getenv("MIN_QUOTE_VOLUME", "100000000"))
+    )
+    max_spread_bps: float = field(
+        default_factory=lambda: float(os.getenv("MAX_SPREAD_BPS", "3.5"))
+    )

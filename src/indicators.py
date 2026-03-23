@@ -130,3 +130,37 @@ def adx(
         adx_vals.append((adx_vals[-1] * (period - 1) + dx[i]) / period)
 
     return adx_vals
+
+
+def rsi(prices: List[float], period: int = 14) -> List[float]:
+    """Calculate Relative Strength Index (Wilder smoothing).
+
+    Returns a list starting from the first RSI value (needs period+1 prices
+    as input).  Values are in [0, 100].
+    """
+    if not prices or len(prices) < period + 1:
+        return []
+
+    arr = np.array(prices, dtype=np.float64)
+    deltas = np.diff(arr)
+    gains = np.where(deltas > 0, deltas, 0.0)
+    losses = np.where(deltas < 0, -deltas, 0.0)
+
+    avg_gain = float(np.mean(gains[:period]))
+    avg_loss = float(np.mean(losses[:period]))
+
+    result: List[float] = []
+
+    def _rsi_val(ag: float, al: float) -> float:
+        if al == 0:
+            return 100.0
+        return 100.0 - 100.0 / (1.0 + ag / al)
+
+    result.append(_rsi_val(avg_gain, avg_loss))
+
+    for i in range(period, len(deltas)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+        result.append(_rsi_val(avg_gain, avg_loss))
+
+    return result

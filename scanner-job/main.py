@@ -105,6 +105,8 @@ async def fetch_universe(
         universe_symbols, volume_ranked, blacklist = await fetcher.select_universe(
             app_cfg.top_n,
             list(app_cfg.blacklist),
+            min_quote_volume=app_cfg.min_quote_volume,
+            max_spread_bps=app_cfg.max_spread_bps,
         )
         if not universe_symbols:
             errors.append(record_error("universe_empty"))

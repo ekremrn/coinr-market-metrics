@@ -113,6 +113,8 @@ class BinanceDataFetcher:
         self,
         top_n: int,
         blacklist: List[str],
+        min_quote_volume: float = 0.0,
+        max_spread_bps: float = 0.0,
     ) -> Tuple[List[str], List[Dict[str, Any]], List[str]]:
         exchange_info = await self.get_exchange_info()
         if not exchange_info:
@@ -127,28 +129,65 @@ class BinanceDataFetcher:
             and item.get("status") == "TRADING"
         }
 
-        tickers = await self.get_24h_tickers()
-        if not tickers:
+        # Fetch tickers and book tickers in parallel when spread filter is active.
+        if max_spread_bps > 0:
+            tickers_data, book_data = await asyncio.gather(
+                self.get_24h_tickers(),
+                self.get_book_tickers(),
+            )
+            book_map: Dict[str, Any] = {
+                item["symbol"]: item
+                for item in (book_data or [])
+                if item.get("symbol")
+            }
+        else:
+            tickers_data = await self.get_24h_tickers()
+            book_map = {}
+
+        if not tickers_data:
             return [], [], []
 
+        blacklist_set = {item.upper() for item in blacklist}
+
         ranked: List[Tuple[str, float]] = []
-        for ticker in tickers:
+        for ticker in tickers_data:
             symbol = ticker.get("symbol")
             if symbol not in eligible:
+                continue
+            if symbol in blacklist_set:
                 continue
             try:
                 quote_volume = float(ticker.get("quoteVolume", 0.0))
             except (TypeError, ValueError):
                 quote_volume = 0.0
+
+            # Volume floor: skip tokens with insufficient 24h notional volume.
+            if min_quote_volume > 0 and quote_volume < min_quote_volume:
+                continue
+
+            # Spread gate: skip tokens whose bid/ask spread exceeds the threshold.
+            # This removes wash-traded meme tokens that inflate volume rankings
+            # but have artificially wide spreads (poor real liquidity).
+            if max_spread_bps > 0 and symbol in book_map:
+                book = book_map[symbol]
+                try:
+                    bid = float(book.get("bidPrice", 0))
+                    ask = float(book.get("askPrice", 0))
+                    mid = (bid + ask) / 2.0
+                    if mid > 0:
+                        spread = ((ask - bid) / mid) * 10000.0
+                        if spread > max_spread_bps:
+                            continue
+                except (TypeError, ValueError):
+                    pass
+
             ranked.append((symbol, quote_volume))
 
         ranked.sort(key=lambda item: item[1], reverse=True)
-        blacklist_set = {item.upper() for item in blacklist}
-        filtered = [(sym, qv) for sym, qv in ranked if sym not in blacklist_set]
-        universe = [sym for sym, _ in filtered][:top_n]
+        universe = [sym for sym, _ in ranked[:top_n]]
         volume_ranked = [
             {"symbol": sym, "quote_volume": qv}
-            for sym, qv in filtered[: max(top_n, len(universe))]
+            for sym, qv in ranked[:top_n]
         ]
 
         return universe, volume_ranked, list(blacklist_set)

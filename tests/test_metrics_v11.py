@@ -247,6 +247,7 @@ def test_build_market_metrics_detects_exhaustion_environment():
             taker_dominance_15m="sell_dominant",
             direction_consensus=0.8,
             volume_confirmation_15m=0.2,
+            vol_ratio_15m=0.5,  # declining volume — characteristic of exhaustion
             taker_conflict_15m=True,
             ema_distance_atr_15m=2.3,
             range_position_15m=0.99,
@@ -263,6 +264,10 @@ def test_build_market_metrics_detects_exhaustion_environment():
 
 
 def test_build_market_metrics_does_not_emit_directional_only_mode_on_thin_tape():
+    # vol_ratio_15m=0.2 represents genuinely thin tape (<25% of average volume).
+    # Old formula scored this as 0 for any vol_ratio<1.0 (binary zero).
+    # New graduated formula: volume_score(0.2)=0.1, so volume_health≈0.1 which
+    # still triggers the directional_only_blocked guard (threshold 0.18).
     btc = make_feature(
         "BTCUSDT",
         dir_1h="bullish",
@@ -270,8 +275,8 @@ def test_build_market_metrics_does_not_emit_directional_only_mode_on_thin_tape()
         adx_15m=33.0,
         taker_dominance_15m="buy_dominant",
         direction_consensus=0.90,
-        volume_confirmation_15m=0.08,
-        vol_ratio_15m=0.9,
+        volume_confirmation_15m=0.10,
+        vol_ratio_15m=0.2,
     )
     alts = [
         make_feature(
@@ -281,8 +286,8 @@ def test_build_market_metrics_does_not_emit_directional_only_mode_on_thin_tape()
             adx_15m=29.0 + i,
             taker_dominance_15m="buy_dominant",
             direction_consensus=0.84,
-            volume_confirmation_15m=0.08,
-            vol_ratio_15m=0.9,
+            volume_confirmation_15m=0.10,
+            vol_ratio_15m=0.2,
             spread_bps=3.0,
             return_15m_4=0.012,
             return_1h_6=0.026,

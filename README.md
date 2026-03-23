@@ -3,7 +3,7 @@
 A standalone microservice that computes market-state metrics from Binance USDT perpetual futures and publishes live snapshots to Redis, with historical snapshots stored in MongoDB. A FastAPI server exposes SSE endpoints for streaming updates.
 
 ## What it does
-- Every 15 minutes (right after a 15m candle closes), it fetches top USDT perpetual symbols by 24h quote volume (excluding blacklist) and always includes BTCUSDT for calculations.
+- Every 5 minutes it fetches top USDT perpetual symbols by 24h quote volume, filtered by minimum volume and maximum spread thresholds (universe quality gates), and always includes BTCUSDT for calculations.
 - Computes standardized market metrics (0..1 scores + categorical regimes).
 - Computes coin-level metrics and ranks top candidates.
 - Writes latest snapshots to Redis and history to MongoDB.
@@ -80,7 +80,7 @@ Response is cached in Redis for 5 minutes.
 curl -N http://localhost:8000/setups/stream
 ```
 
-## Metrics overview (v1.1)
+## Metrics overview (v1.2)
 Market metrics (all normalized 0..1 or categorical):
 - `tradeability_score`: composite of trend breadth, direction consensus, liquidity health, volatility usability, and taker alignment
 - `chop_score`: composite of low-ADX share, direction dispersion, and taker conflict share
@@ -108,11 +108,13 @@ Coin metrics (per symbol in top N):
 - `liquidity_score`, `trend_score`, `attractiveness_score`
 - `flags`: lightweight explanations
 - `relative_strength_score`: normalized BTC-relative strength
-- `extension_score`: EMA/range/ATR-based stretch score
+- `rsi_15m`: RSI(14) on the 15m timeframe
+- `extension_score`: EMA/range/ATR/RSI-based stretch score (direction-aware: near-resistance penalises longs, near-support penalises shorts)
 - `fakeout_risk`: quick-failure risk for the current move
 - `execution_cost_score`: spread + volatility usability score
 - `long_score`, `short_score`: side-specific setup quality
 - `regime_label`, `diagnostic_tags`: richer symbol context without changing compatibility flags
+  - tags include `rsi_overbought` (RSI≥70) and `rsi_oversold` (RSI≤30)
 
 ## Notes
 - Storage:
@@ -122,13 +124,15 @@ Coin metrics (per symbol in top N):
   - Market snapshots are stored in hardcoded DB `coinr-market-metrics`, collection `market_state_snapshots`
   - Historical setups are read from hardcoded DB `coinr`, collection `analyses`
 
-## Cronjob example (every 15 minutes)
-If you want the task to run via cron and exit after completion, add a crontab entry like:
+## Cronjob example (every 5 minutes)
+The scanner is a one-shot job designed to be triggered by a cron. Add a crontab entry like:
 
 ```cron
-*/15 * * * * cd /../coinr-market-metrics && docker compose run market-scanner -d
+*/5 * * * * cd /path/to/coinr-market-metrics && docker compose up market-scanner
 ```
 
 Notes:
 - Make sure `docker compose -f docker-compose.infra.yml up -d` is running for Redis/MongoDB.
 - Adjust the path to your local project directory.
+- Uses `docker compose up` (not `run`) so Docker reuses the fixed `container_name` — if the previous scan is still running when the next cron fires, Docker will not start a second container, preventing parallel writes to Redis/MongoDB.
+- Universe quality gates (`MIN_QUOTE_VOLUME`, `MAX_SPREAD_BPS`) filter out wash-traded / illiquid tokens before metric computation.
