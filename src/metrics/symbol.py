@@ -102,12 +102,16 @@ def build_symbol_metrics(
     vol_score = volatility_band_score(atrp_15m)
     volm_score = volume_score(vol_ratio_15m)
 
+    # Compute extension early so it can penalise attractiveness.
+    ext_for_attractiveness = extension_score_from_feature(feature)
+
     attractiveness = (
-        0.30 * trend_score
-        + 0.25 * liquidity_score
-        + 0.20 * align_score
-        + 0.15 * vol_score
+        0.25 * trend_score
+        + 0.22 * liquidity_score
+        + 0.18 * align_score
+        + 0.13 * vol_score
         + 0.10 * volm_score
+        + 0.12 * (1.0 - ext_for_attractiveness)
     )
     attractiveness = clamp(attractiveness, 0.0, 1.0)
 
@@ -128,7 +132,7 @@ def build_symbol_metrics(
     relative_strength_score = relative_strength_from_returns(feature, btc_feature)
     execution_cost_score = execution_cost_score_from_feature(feature)
     # Symmetric extension used for regime label and fakeout risk (side unknown).
-    extension_score = extension_score_from_feature(feature)
+    extension_score = ext_for_attractiveness
     # Direction-aware extensions: long penalises near-resistance; short near-support.
     long_extension = extension_score_from_feature(feature, direction="bullish")
     short_extension = extension_score_from_feature(feature, direction="bearish")
