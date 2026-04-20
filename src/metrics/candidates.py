@@ -25,6 +25,8 @@ def select_candidates(symbols: List[Dict[str, Any]], k: int = 10) -> List[Dict[s
                 "attractiveness_score": item.get("attractiveness_score", 0.0),
                 "relative_strength_score": item.get("relative_strength_score"),
                 "extension_score": item.get("extension_score", 0.0),
+                "long_exhaustion_risk": item.get("long_exhaustion_risk", 0.0),
+                "short_exhaustion_risk": item.get("short_exhaustion_risk", 0.0),
                 "fakeout_risk": item.get("fakeout_risk", 0.0),
                 "execution_cost_score": item.get("execution_cost_score", 0.0),
                 "long_score": item.get("long_score", 0.0),

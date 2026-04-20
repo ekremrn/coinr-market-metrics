@@ -92,6 +92,45 @@ def extension_score_from_feature(feature: Dict[str, Any], direction: str = "neut
     return clamp(0.6 * distance_score + 0.3 * edge_score + 0.1 * volume_confirmation, 0.0, 1.0)
 
 
+def exhaustion_risk_from_feature(feature: Dict[str, Any], side: str) -> float:
+    ema_distance_atr = feature.get("ema_distance_atr_15m")
+    range_position = feature.get("range_position_15m")
+    volume_confirmation = clamp(feature.get("volume_confirmation_15m", 0.0), 0.0, 1.0)
+    direction_consensus = clamp(feature.get("direction_consensus", 0.5), 0.0, 1.0)
+    rsi_15m = feature.get("rsi_15m")
+
+    distance_score = normalize_range(ema_distance_atr, 1.0, 2.7)
+    if range_position is None:
+        edge_score = 0.0
+    else:
+        edge_value = range_position if side == "long" else 1.0 - range_position
+        edge_score = normalize_range(edge_value, 0.65, 1.0)
+
+    if rsi_15m is None:
+        rsi_score = 0.0
+    elif side == "long":
+        rsi_score = normalize_range(rsi_15m, 62.0, 80.0)
+    else:
+        rsi_score = normalize_range(38.0 - rsi_15m, 0.0, 18.0)
+
+    weak_volume = 1.0 - volume_confirmation
+    taker_conflict = 1.0 if feature.get("taker_conflict_15m") else 0.0
+    local_chop = 1.0 - normalize_range(feature.get("adx_15m"), 22.0, 35.0)
+    consensus_weakness = 1.0 - direction_consensus
+
+    return clamp(
+        0.28 * distance_score
+        + 0.22 * edge_score
+        + 0.18 * rsi_score
+        + 0.14 * weak_volume
+        + 0.10 * taker_conflict
+        + 0.05 * local_chop
+        + 0.03 * consensus_weakness,
+        0.0,
+        1.0,
+    )
+
+
 def fakeout_risk_from_feature(
     feature: Dict[str, Any],
     execution_cost_score: float,
@@ -142,6 +181,7 @@ def side_score_from_feature(
     execution_cost_score: float,
     extension_score: float,
     fakeout_risk: float,
+    exhaustion_risk: float,
 ) -> float:
     dir_alignment = side_alignment_score(feature.get("dir_15m", "neutral"), feature.get("dir_1h", "neutral"), side)
     dominance = dominance_score_for_side(feature.get("taker_dominance_15m", "neutral"), side)
@@ -155,12 +195,13 @@ def side_score_from_feature(
         0.18 * dir_alignment
         + 0.10 * dominance
         + 0.16 * relative_side
-        + 0.12 * (1.0 - extension_score)
-        + 0.14 * (1.0 - fakeout_risk)
+        + 0.10 * (1.0 - extension_score)
+        + 0.12 * (1.0 - fakeout_risk)
+        + 0.12 * (1.0 - exhaustion_risk)
         + 0.10 * execution_cost_score
-        + 0.10 * volume_confirmation
-        + 0.05 * trend_score
-        + 0.05 * consensus,
+        + 0.07 * volume_confirmation
+        + 0.03 * trend_score
+        + 0.02 * consensus,
         0.0,
         1.0,
     )
@@ -169,5 +210,7 @@ def side_score_from_feature(
         score *= 0.78
     if trend_score < 0.40 and consensus < 0.70:
         score *= 0.82
+    if exhaustion_risk >= 0.60:
+        score *= 0.84
 
     return clamp(score, 0.0, 1.0)

@@ -55,6 +55,8 @@ def make_symbol(symbol: str) -> dict:
         "flags": [],
         "relative_strength_score": 0.63,
         "extension_score": 0.38,
+        "long_exhaustion_risk": 0.24,
+        "short_exhaustion_risk": 0.12,
         "fakeout_risk": 0.24,
         "execution_cost_score": 0.79,
         "long_score": 0.76,

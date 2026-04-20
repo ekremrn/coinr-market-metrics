@@ -32,6 +32,7 @@ def make_feature(
     ema_distance_atr_15m: float = 0.6,
     direction_consensus: float = 0.8,
     volume_confirmation_15m: float = 0.7,
+    rsi_15m: float = 58.0,
     taker_conflict_15m: bool | None = None,
     returns_1h: list[float] | None = None,
 ) -> dict[str, Any]:
@@ -64,6 +65,7 @@ def make_feature(
         "ema21_15m": 98.0,
         "ema_distance_atr_15m": ema_distance_atr_15m,
         "volume_confirmation_15m": volume_confirmation_15m,
+        "rsi_15m": rsi_15m,
         "taker_conflict_15m": taker_conflict_15m,
         "direction_consensus": direction_consensus,
     }
@@ -327,7 +329,102 @@ def test_build_symbol_metrics_adds_relative_strength_and_side_scores():
     assert metrics["relative_strength_score"] is not None
     assert metrics["relative_strength_score"] > 0.5
     assert metrics["long_score"] > metrics["short_score"]
+    assert metrics["long_exhaustion_risk"] is not None
+    assert metrics["short_exhaustion_risk"] is not None
     assert metrics["regime_label"] in {"TREND", "TREND_PULLBACK", "TREND_EXTENSION", "EXPANSION"}
+
+
+def test_build_symbol_metrics_adds_side_aware_exhaustion_risks():
+    btc = make_feature(
+        "BTCUSDT",
+        dir_1h="bullish",
+        dir_15m="bullish",
+        adx_15m=31.0,
+        return_15m_4=0.012,
+        return_1h_6=0.025,
+    )
+    long_tired = build_symbol_metrics(
+        make_feature(
+            "SOLUSDT",
+            dir_1h="bullish",
+            dir_15m="bullish",
+            adx_15m=26.0,
+            range_position_15m=0.98,
+            ema_distance_atr_15m=2.4,
+            rsi_15m=79.0,
+            volume_confirmation_15m=0.12,
+            taker_conflict_15m=True,
+        ),
+        "bullish",
+        btc,
+    )
+    short_tired = build_symbol_metrics(
+        make_feature(
+            "ETHUSDT",
+            dir_1h="bearish",
+            dir_15m="bearish",
+            adx_15m=26.0,
+            range_position_15m=0.04,
+            ema_distance_atr_15m=2.4,
+            rsi_15m=21.0,
+            volume_confirmation_15m=0.12,
+            taker_conflict_15m=True,
+        ),
+        "bearish",
+        btc,
+    )
+
+    assert long_tired["long_exhaustion_risk"] > 0.6
+    assert long_tired["long_exhaustion_risk"] > long_tired["short_exhaustion_risk"]
+    assert short_tired["short_exhaustion_risk"] > 0.6
+    assert short_tired["short_exhaustion_risk"] > short_tired["long_exhaustion_risk"]
+
+
+def test_build_symbol_metrics_penalizes_side_score_when_exhaustion_rises():
+    btc = make_feature(
+        "BTCUSDT",
+        dir_1h="bullish",
+        dir_15m="bullish",
+        adx_15m=30.0,
+        return_15m_4=0.01,
+        return_1h_6=0.02,
+    )
+    clean = build_symbol_metrics(
+        make_feature(
+            "ETHUSDT",
+            dir_1h="bullish",
+            dir_15m="bullish",
+            adx_15m=29.0,
+            taker_dominance_15m="buy_dominant",
+            direction_consensus=0.9,
+            volume_confirmation_15m=0.82,
+            range_position_15m=0.56,
+            ema_distance_atr_15m=0.7,
+            rsi_15m=58.0,
+        ),
+        "bullish",
+        btc,
+    )
+    tired = build_symbol_metrics(
+        make_feature(
+            "ETHUSDT",
+            dir_1h="bullish",
+            dir_15m="bullish",
+            adx_15m=24.0,
+            taker_dominance_15m="buy_dominant",
+            direction_consensus=0.68,
+            volume_confirmation_15m=0.16,
+            range_position_15m=0.99,
+            ema_distance_atr_15m=2.4,
+            rsi_15m=80.0,
+            taker_conflict_15m=True,
+        ),
+        "bullish",
+        btc,
+    )
+
+    assert clean["long_exhaustion_risk"] < tired["long_exhaustion_risk"]
+    assert clean["long_score"] > tired["long_score"]
 
 
 def test_build_symbol_metrics_flags_extension_and_fakeout_without_new_compat_flags():
@@ -480,3 +577,4 @@ def test_select_candidates_preserves_attractiveness_ranking():
 
     assert [item["symbol"] for item in ranked] == ["A", "B"]
     assert all("diagnostic_tags" in item for item in ranked)
+    assert all("long_exhaustion_risk" in item for item in ranked)

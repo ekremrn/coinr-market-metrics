@@ -17,6 +17,7 @@ from .normalizers import (
     weighted_mean,
 )
 from .scores import (
+    exhaustion_risk_from_feature,
     execution_cost_score_from_feature,
     extension_score_from_feature,
     fakeout_risk_from_feature,
@@ -237,7 +238,11 @@ def build_market_metrics(
         relative_strength_score = relative_strength_from_returns(item, btc)
         execution_cost_score = execution_cost_score_from_feature(item)
         extension_score = extension_score_from_feature(item)
+        long_extension = extension_score_from_feature(item, direction="bullish")
+        short_extension = extension_score_from_feature(item, direction="bearish")
         fakeout_risk = fakeout_risk_from_feature(item, execution_cost_score, extension_score)
+        long_exhaustion_risk = exhaustion_risk_from_feature(item, "long")
+        short_exhaustion_risk = exhaustion_risk_from_feature(item, "short")
         extension_values.append(extension_score)
         fakeout_values.append(fakeout_risk)
         long_scores.append(
@@ -246,8 +251,9 @@ def build_market_metrics(
                 item,
                 relative_strength_score,
                 execution_cost_score,
-                extension_score,
+                long_extension,
                 fakeout_risk,
+                long_exhaustion_risk,
             )
         )
         short_scores.append(
@@ -256,8 +262,9 @@ def build_market_metrics(
                 item,
                 relative_strength_score,
                 execution_cost_score,
-                extension_score,
+                short_extension,
                 fakeout_risk,
+                short_exhaustion_risk,
             )
         )
 

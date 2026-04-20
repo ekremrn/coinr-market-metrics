@@ -110,6 +110,9 @@ def test_setups_history_ignores_still_valid_setups(monkeypatch):
             "stop_loss_price": 3300.0,
             "take_profit_prices": [3100.0],
             "valid_for_minutes": 60,
+            "signal_id": "",
+            "size_multiplier": 1.0,
+            "sizing_reasons": [],
             "notes": ["expired"],
             "decision_context": {
                 "decision_stage": "REVIEWED_ACCEPT",

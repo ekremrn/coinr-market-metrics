@@ -13,6 +13,7 @@ from .normalizers import (
     volume_score,
 )
 from .scores import (
+    exhaustion_risk_from_feature,
     execution_cost_score_from_feature,
     extension_score_from_feature,
     fakeout_risk_from_feature,
@@ -54,6 +55,8 @@ def build_symbol_diagnostic_tags(
     execution_cost_score: float,
     long_score: float,
     short_score: float,
+    long_exhaustion_risk: float,
+    short_exhaustion_risk: float,
 ) -> List[str]:
     tags: List[str] = []
     if feature.get("direction_consensus", 0.5) >= 0.75:
@@ -68,6 +71,10 @@ def build_symbol_diagnostic_tags(
         tags.append("extended_move")
     if fakeout_risk >= 0.65:
         tags.append("fakeout_risk_high")
+    if long_exhaustion_risk >= 0.60:
+        tags.append("long_exhaustion_high")
+    if short_exhaustion_risk >= 0.60:
+        tags.append("short_exhaustion_high")
     if relative_strength_score is not None:
         if relative_strength_score >= 0.65:
             tags.append("relative_strength_leader")
@@ -137,6 +144,8 @@ def build_symbol_metrics(
     long_extension = extension_score_from_feature(feature, direction="bullish")
     short_extension = extension_score_from_feature(feature, direction="bearish")
     fakeout_risk = fakeout_risk_from_feature(feature, execution_cost_score, extension_score)
+    long_exhaustion_risk = exhaustion_risk_from_feature(feature, "long")
+    short_exhaustion_risk = exhaustion_risk_from_feature(feature, "short")
     long_score = side_score_from_feature(
         "long",
         feature,
@@ -144,6 +153,7 @@ def build_symbol_metrics(
         execution_cost_score,
         long_extension,
         fakeout_risk,
+        long_exhaustion_risk,
     )
     short_score = side_score_from_feature(
         "short",
@@ -152,6 +162,7 @@ def build_symbol_metrics(
         execution_cost_score,
         short_extension,
         fakeout_risk,
+        short_exhaustion_risk,
     )
     regime_label = determine_symbol_regime_label(feature, extension_score, fakeout_risk)
     diagnostic_tags = build_symbol_diagnostic_tags(
@@ -162,6 +173,8 @@ def build_symbol_metrics(
         execution_cost_score,
         long_score,
         short_score,
+        long_exhaustion_risk,
+        short_exhaustion_risk,
     )
 
     return {
@@ -179,6 +192,8 @@ def build_symbol_metrics(
         "flags": flags,
         "relative_strength_score": relative_strength_score,
         "extension_score": extension_score,
+        "long_exhaustion_risk": long_exhaustion_risk,
+        "short_exhaustion_risk": short_exhaustion_risk,
         "fakeout_risk": fakeout_risk,
         "execution_cost_score": execution_cost_score,
         "long_score": long_score,
