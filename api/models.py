@@ -45,6 +45,10 @@ class MarketState(BaseModel):
     regime_detail: Optional[RegimeDetail] = Field(None, description="Higher-resolution regime label for the current tape.")
     long_environment_score: Optional[float] = Field(None, ge=0, le=1, description="Aggregate quality score for long-side conditions.")
     short_environment_score: Optional[float] = Field(None, ge=0, le=1, description="Aggregate quality score for short-side conditions.")
+    raw_long_environment_score: Optional[float] = Field(None, ge=0, le=1, description="Current-snapshot long env score before history smoothing.")
+    raw_short_environment_score: Optional[float] = Field(None, ge=0, le=1, description="Current-snapshot short env score before history smoothing.")
+    raw_recommended_mode: Optional[RecommendedMode] = Field(None, description="Directional mode implied by smoothed env before hysteresis.")
+    bias_score: Optional[float] = Field(None, ge=-1, le=1, description="Smoothed long-short env spread. Positive values favour longs.")
     breakout_failure_risk: Optional[float] = Field(None, ge=0, le=1, description="Estimated risk of failed breakouts and fast reversals.")
     market_diagnostic_tags: List[str] = Field(default_factory=list, description="Human-readable diagnostic tags for tape quality and edge concentration.")
 

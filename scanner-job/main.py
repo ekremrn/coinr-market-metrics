@@ -13,6 +13,7 @@ from src.metrics import (
     build_symbol_features,
     build_symbol_metrics,
     select_candidates,
+    stabilize_market_bias,
 )
 from src.storage import MongoStore, RedisStore
 from src.utils import utc_now_iso, utc_now_ms
@@ -297,6 +298,20 @@ async def store_snapshot(
     return snapshot
 
 
+def load_recent_market_history(limit: int = 5) -> List[Dict[str, Any]]:
+    """Load recent successful market snapshots for bias smoothing."""
+    mongo_store = MongoStore(MongoConfig())
+    history = mongo_store.find(
+        "market_state_snapshots",
+        query={"status": "ok"},
+        projection={"_id": 0, "market": 1, "ts_ms": 1},
+        sort=[("ts_ms", -1)],
+        limit=limit,
+    )
+    history.reverse()
+    return [dict(item.get("market") or {}) for item in history]
+
+
 async def run_once() -> Dict[str, Any]:
     """Main entry point for market scan."""
     logger = get_logger("market-metrics-worker")
@@ -314,6 +329,12 @@ async def run_once() -> Dict[str, Any]:
     # Compute features and metrics
     calc_symbols = sorted({*market_data.universe_symbols, "BTCUSDT"})
     market, symbol_metrics, _ = compute_features_and_metrics(market_data, calc_symbols)
+    try:
+        history_markets = await asyncio.to_thread(load_recent_market_history, 5)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Recent market history unavailable, skipping smoothing: {exc}")
+        history_markets = []
+    market = stabilize_market_bias(market, history_markets)
 
     # Select top candidates
     candidates = select_candidates(symbol_metrics, app_cfg.candidates_k)

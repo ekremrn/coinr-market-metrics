@@ -36,6 +36,11 @@ REGIME_DETAILS = {
     "MIXED",
 }
 
+_DIRECTIONAL_MODES = {"LONG_ONLY", "SHORT_ONLY"}
+_BIAS_SMOOTHING_ALPHA = 0.45
+_RAW_DIRECTIONAL_BIAS_THRESHOLD = 0.16
+_RAW_DIRECTIONAL_ENV_FLOOR = 0.60
+
 
 def determine_market_regime_detail(
     tradeability_score: float,
@@ -85,6 +90,169 @@ def build_market_diagnostic_tags(
     elif short_environment_score - long_environment_score >= 0.12:
         tags.append("short_environment_dominant")
     return tags
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _derive_raw_recommended_mode(
+    *,
+    market_regime: str,
+    long_environment_score: float,
+    short_environment_score: float,
+) -> str:
+    if str(market_regime).upper() == "OFF":
+        return "OFF"
+    if (
+        long_environment_score - short_environment_score >= _RAW_DIRECTIONAL_BIAS_THRESHOLD
+        and long_environment_score >= _RAW_DIRECTIONAL_ENV_FLOOR
+    ):
+        return "LONG_ONLY"
+    if (
+        short_environment_score - long_environment_score >= _RAW_DIRECTIONAL_BIAS_THRESHOLD
+        and short_environment_score >= _RAW_DIRECTIONAL_ENV_FLOOR
+    ):
+        return "SHORT_ONLY"
+    return "SELECTIVE"
+
+
+def _ema(values: List[float], alpha: float) -> float:
+    if not values:
+        return 0.0
+    ema_value = values[0]
+    for value in values[1:]:
+        ema_value = alpha * value + (1.0 - alpha) * ema_value
+    return ema_value
+
+
+def _historical_raw_env(market: Dict[str, Any], side: str) -> float | None:
+    raw_key = "raw_long_environment_score" if side == "long" else "raw_short_environment_score"
+    env_key = "long_environment_score" if side == "long" else "short_environment_score"
+    raw_value = _safe_float(market.get(raw_key))
+    if raw_value is not None:
+        return clamp(raw_value, 0.0, 1.0)
+    env_value = _safe_float(market.get(env_key))
+    if env_value is None:
+        return None
+    return clamp(env_value, 0.0, 1.0)
+
+
+def _historical_raw_mode(market: Dict[str, Any]) -> str:
+    raw_mode = str(market.get("raw_recommended_mode") or "").upper()
+    if raw_mode:
+        return raw_mode
+
+    resolved_mode = str(market.get("recommended_mode") or "").upper()
+    if resolved_mode:
+        return resolved_mode
+
+    market_regime = str(market.get("market_regime") or "SELECTIVE").upper()
+    long_env = _historical_raw_env(market, "long")
+    short_env = _historical_raw_env(market, "short")
+    if long_env is None or short_env is None:
+        return "OFF" if market_regime == "OFF" else "SELECTIVE"
+    return _derive_raw_recommended_mode(
+        market_regime=market_regime,
+        long_environment_score=long_env,
+        short_environment_score=short_env,
+    )
+
+
+def _apply_mode_hysteresis(prev_state: str, prev_raw_mode: str, raw_mode: str) -> str:
+    prev_state = str(prev_state or "SELECTIVE").upper()
+    prev_raw_mode = str(prev_raw_mode or "SELECTIVE").upper()
+    raw_mode = str(raw_mode or "SELECTIVE").upper()
+
+    if raw_mode == "OFF":
+        return "OFF"
+
+    if prev_state == "OFF":
+        if raw_mode == "SELECTIVE":
+            return "SELECTIVE"
+        return raw_mode if prev_raw_mode == raw_mode else "SELECTIVE"
+
+    if prev_state == "SELECTIVE":
+        if raw_mode in _DIRECTIONAL_MODES and prev_raw_mode == raw_mode:
+            return raw_mode
+        return raw_mode if raw_mode == "OFF" else "SELECTIVE"
+
+    if raw_mode == prev_state:
+        return prev_state
+
+    if raw_mode in _DIRECTIONAL_MODES and raw_mode != prev_state:
+        return "SELECTIVE" if prev_raw_mode != prev_state else prev_state
+
+    return "SELECTIVE" if prev_raw_mode != prev_state else prev_state
+
+
+def stabilize_market_bias(
+    current_market: Dict[str, Any],
+    history_markets: List[Dict[str, Any]] | None = None,
+    *,
+    alpha: float = _BIAS_SMOOTHING_ALPHA,
+) -> Dict[str, Any]:
+    """Smooth env scores with recent history and resolve mode with hysteresis."""
+    history_markets = list(history_markets or [])
+    market = dict(current_market)
+
+    raw_long = clamp(_safe_float(current_market.get("long_environment_score")) or 0.0, 0.0, 1.0)
+    raw_short = clamp(_safe_float(current_market.get("short_environment_score")) or 0.0, 0.0, 1.0)
+    market_regime = str(current_market.get("market_regime") or "SELECTIVE").upper()
+
+    historical_longs = [
+        value
+        for value in (_historical_raw_env(item, "long") for item in history_markets[-5:])
+        if value is not None
+    ]
+    historical_shorts = [
+        value
+        for value in (_historical_raw_env(item, "short") for item in history_markets[-5:])
+        if value is not None
+    ]
+
+    long_values = historical_longs + [raw_long]
+    short_values = historical_shorts + [raw_short]
+    smoothed_long = clamp(_ema(long_values, alpha), 0.0, 1.0) if len(long_values) >= 2 else raw_long
+    smoothed_short = clamp(_ema(short_values, alpha), 0.0, 1.0) if len(short_values) >= 2 else raw_short
+    bias_score = clamp(smoothed_long - smoothed_short, -1.0, 1.0)
+    raw_mode = _derive_raw_recommended_mode(
+        market_regime=market_regime,
+        long_environment_score=smoothed_long,
+        short_environment_score=smoothed_short,
+    )
+
+    resolved_mode = raw_mode
+    if market_regime != "OFF":
+        if len(history_markets) >= 1:
+            history_slice = history_markets[-5:]
+            state = str(
+                history_slice[0].get("recommended_mode")
+                or history_slice[0].get("raw_recommended_mode")
+                or _historical_raw_mode(history_slice[0])
+            ).upper()
+            previous_raw_mode = _historical_raw_mode(history_slice[0])
+            for item in history_slice[1:]:
+                item_raw_mode = _historical_raw_mode(item)
+                state = _apply_mode_hysteresis(state, previous_raw_mode, item_raw_mode)
+                previous_raw_mode = item_raw_mode
+            resolved_mode = _apply_mode_hysteresis(state, previous_raw_mode, raw_mode)
+    else:
+        resolved_mode = "OFF"
+
+    market["raw_long_environment_score"] = raw_long
+    market["raw_short_environment_score"] = raw_short
+    market["long_environment_score"] = smoothed_long
+    market["short_environment_score"] = smoothed_short
+    market["bias_score"] = bias_score
+    market["raw_recommended_mode"] = raw_mode
+    market["recommended_mode"] = resolved_mode
+    return market
 
 
 def build_market_metrics(

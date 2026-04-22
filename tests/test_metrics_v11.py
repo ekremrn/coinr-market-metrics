@@ -8,6 +8,7 @@ from src.metrics import (
     build_symbol_metrics,
     select_candidates,
 )
+from src.metrics.market import stabilize_market_bias
 
 
 def _make_return_series(seed: float, drift: float, length: int = 24) -> list[float]:
@@ -302,6 +303,104 @@ def test_build_market_metrics_does_not_emit_directional_only_mode_on_thin_tape()
     assert market["volume_health_15m"] < 0.12
     assert market["recommended_mode"] in {"OFF", "SELECTIVE"}
     assert market["recommended_mode"] != "LONG_ONLY"
+
+
+def test_stabilize_market_bias_adds_raw_and_smoothed_fields():
+    current_market = {
+        "market_regime": "TRENDING",
+        "recommended_mode": "LONG_ONLY",
+        "long_environment_score": 0.64,
+        "short_environment_score": 0.46,
+        "breakout_failure_risk": 0.30,
+    }
+    history = [
+        {
+            "recommended_mode": "LONG_ONLY",
+            "raw_recommended_mode": "LONG_ONLY",
+            "raw_long_environment_score": 0.66,
+            "raw_short_environment_score": 0.44,
+        },
+        {
+            "recommended_mode": "LONG_ONLY",
+            "raw_recommended_mode": "LONG_ONLY",
+            "raw_long_environment_score": 0.63,
+            "raw_short_environment_score": 0.45,
+        },
+    ]
+
+    stabilized = stabilize_market_bias(current_market, history)
+
+    assert stabilized["raw_long_environment_score"] == 0.64
+    assert stabilized["raw_short_environment_score"] == 0.46
+    assert stabilized["long_environment_score"] != stabilized["raw_long_environment_score"]
+    assert stabilized["short_environment_score"] != stabilized["raw_short_environment_score"]
+    assert stabilized["bias_score"] == stabilized["long_environment_score"] - stabilized["short_environment_score"]
+    assert stabilized["raw_recommended_mode"] == "LONG_ONLY"
+    assert stabilized["recommended_mode"] == "LONG_ONLY"
+
+
+def test_stabilize_market_bias_requires_two_snapshots_to_leave_directional_mode():
+    current_market = {
+        "market_regime": "TRENDING",
+        "recommended_mode": "LONG_ONLY",
+        "long_environment_score": 0.55,
+        "short_environment_score": 0.50,
+        "breakout_failure_risk": 0.30,
+    }
+    history = [
+        {
+            "recommended_mode": "LONG_ONLY",
+            "raw_recommended_mode": "LONG_ONLY",
+            "raw_long_environment_score": 0.67,
+            "raw_short_environment_score": 0.43,
+        },
+        {
+            "recommended_mode": "LONG_ONLY",
+            "raw_recommended_mode": "LONG_ONLY",
+            "raw_long_environment_score": 0.65,
+            "raw_short_environment_score": 0.44,
+        },
+        {
+            "recommended_mode": "LONG_ONLY",
+            "raw_recommended_mode": "SELECTIVE",
+            "raw_long_environment_score": 0.58,
+            "raw_short_environment_score": 0.51,
+        },
+    ]
+
+    stabilized = stabilize_market_bias(current_market, history)
+
+    assert stabilized["raw_recommended_mode"] == "SELECTIVE"
+    assert stabilized["recommended_mode"] == "SELECTIVE"
+
+
+def test_stabilize_market_bias_does_not_flip_long_only_directly_to_short_only():
+    current_market = {
+        "market_regime": "TRENDING",
+        "recommended_mode": "SHORT_ONLY",
+        "long_environment_score": 0.20,
+        "short_environment_score": 0.82,
+        "breakout_failure_risk": 0.30,
+    }
+    history = [
+        {
+            "recommended_mode": "LONG_ONLY",
+            "raw_recommended_mode": "LONG_ONLY",
+            "raw_long_environment_score": 0.68,
+            "raw_short_environment_score": 0.42,
+        },
+        {
+            "recommended_mode": "LONG_ONLY",
+            "raw_recommended_mode": "SHORT_ONLY",
+            "raw_long_environment_score": 0.28,
+            "raw_short_environment_score": 0.76,
+        },
+    ]
+
+    stabilized = stabilize_market_bias(current_market, history)
+
+    assert stabilized["raw_recommended_mode"] == "SHORT_ONLY"
+    assert stabilized["recommended_mode"] == "SELECTIVE"
 
 
 def test_build_symbol_metrics_adds_relative_strength_and_side_scores():

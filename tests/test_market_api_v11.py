@@ -34,6 +34,10 @@ def make_market_state() -> dict:
         "regime_detail": "TREND",
         "long_environment_score": 0.74,
         "short_environment_score": 0.41,
+        "raw_long_environment_score": 0.77,
+        "raw_short_environment_score": 0.38,
+        "raw_recommended_mode": "LONG_ONLY",
+        "bias_score": 0.33,
         "breakout_failure_risk": 0.32,
         "market_diagnostic_tags": ["trend_breadth_strong", "long_environment_dominant"],
     }
@@ -109,6 +113,8 @@ def test_market_route_returns_v11_snapshot(monkeypatch):
     payload = response.json()
     assert payload["market_state"]["version"] == "v1.1"
     assert payload["market_state"]["market"]["regime_detail"] == "TREND"
+    assert payload["market_state"]["market"]["raw_recommended_mode"] == "LONG_ONLY"
+    assert payload["market_state"]["market"]["bias_score"] == 0.33
     assert "market_diagnostic_tags" in payload["market_state"]["market"]
     assert "diagnostic_tags" in payload["candidates"][0]
 
@@ -141,3 +147,4 @@ def test_market_history_parses_v11_fields(monkeypatch):
     payload = response.json()
     assert payload[0]["market"]["regime_detail"] == "TREND"
     assert payload[0]["market"]["long_environment_score"] == history_doc["market"]["long_environment_score"]
+    assert payload[0]["market"]["raw_long_environment_score"] == history_doc["market"]["raw_long_environment_score"]
