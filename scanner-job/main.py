@@ -20,8 +20,10 @@ from src.utils import utc_now_iso, utc_now_ms
 
 
 # Kline fetch intervals and limits
+KLINE_INTERVAL_5M = "5m"
 KLINE_INTERVAL_15M = "15m"
 KLINE_INTERVAL_1H = "1h"
+KLINE_LIMIT_5M = 15   # 12 closed + 3 buffer — matches CoinR analysis 12-bar range window
 KLINE_LIMIT_15M = 120  # 30 hours of 15m candles
 KLINE_LIMIT_1H = 48  # 48 hours of 1h candles
 
@@ -45,6 +47,7 @@ class MarketData(NamedTuple):
     funding_map: Dict[str, float]
     klines_15m: Dict[str, Any]
     klines_1h: Dict[str, Any]
+    klines_5m: Dict[str, Any]
     errors: List[Dict[str, str]]
 
 
@@ -68,9 +71,10 @@ def record_error(
 async def fetch_klines_for_symbols(
     fetcher: BinanceDataFetcher,
     symbols: List[str],
-) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, str]]]:
-    """Fetch klines for all symbols in parallel."""
+) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], List[Dict[str, str]]]:
+    """Fetch klines for all symbols in parallel (5m, 15m, 1h)."""
     errors: List[Dict[str, str]] = []
+    klines_5m: Dict[str, Any] = {}
     klines_15m: Dict[str, Any] = {}
     klines_1h: Dict[str, Any] = {}
 
@@ -80,6 +84,7 @@ async def fetch_klines_for_symbols(
 
     tasks = []
     for symbol in symbols:
+        tasks.append(fetch_one(symbol, KLINE_INTERVAL_5M, KLINE_LIMIT_5M))
         tasks.append(fetch_one(symbol, KLINE_INTERVAL_15M, KLINE_LIMIT_15M))
         tasks.append(fetch_one(symbol, KLINE_INTERVAL_1H, KLINE_LIMIT_1H))
 
@@ -88,12 +93,14 @@ async def fetch_klines_for_symbols(
         if not data:
             errors.append(record_error("missing_klines", symbol=symbol, interval=interval))
             continue
-        if interval == KLINE_INTERVAL_15M:
+        if interval == KLINE_INTERVAL_5M:
+            klines_5m[symbol] = data
+        elif interval == KLINE_INTERVAL_15M:
             klines_15m[symbol] = data
         else:
             klines_1h[symbol] = data
 
-    return klines_15m, klines_1h, errors
+    return klines_5m, klines_15m, klines_1h, errors
 
 
 async def fetch_universe(
@@ -175,7 +182,7 @@ async def fetch_all_market_data(
 
     book_map, book_errors = book_result
     funding_map, funding_errors = funding_result
-    klines_15m, klines_1h, kline_errors = klines_result
+    klines_5m, klines_15m, klines_1h, kline_errors = klines_result
 
     all_errors = errors + book_errors + funding_errors + kline_errors
 
@@ -187,6 +194,7 @@ async def fetch_all_market_data(
         funding_map=funding_map,
         klines_15m=klines_15m,
         klines_1h=klines_1h,
+        klines_5m=klines_5m,
         errors=all_errors,
     )
 
@@ -205,6 +213,7 @@ def compute_features_and_metrics(
             market_data.klines_1h.get(symbol),
             market_data.book_map.get(symbol),
             market_data.funding_map.get(symbol),
+            klines_5m=market_data.klines_5m.get(symbol),
         )
         features.append(feature)
 

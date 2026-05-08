@@ -20,7 +20,7 @@ _openapi_url = None if _api_cfg.production else "/openapi.json"
 
 app = FastAPI(
     title="Coinr Market Metrics",
-    version="v1.1",
+    version="v1.3",
     docs_url=_docs_url,
     redoc_url=_redoc_url,
     openapi_url=_openapi_url,

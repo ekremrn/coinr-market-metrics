@@ -150,6 +150,115 @@ def fakeout_risk_from_feature(
     )
 
 
+def side_entry_risk_from_feature(feature: Dict[str, Any], side: str) -> float:
+    """Estimate how likely CoinR analysis will reject a setup on entry-location grounds.
+
+    Semantically distinct from extension_score (which measures how far a move has
+    travelled): entry_risk answers "is the current price a bad entry point?"
+
+    CoinR analysis hard-rejects:
+    - Longs when range_position_5m_12 > 0.80 (entry_at_range_top)
+    - Shorts when range_position_5m_12 < 0.20 (entry_at_range_bottom)
+    - Longs when resistance_distance_pct_15m < 1.0% (entry_too_close_to_resistance)
+    - Shorts when support_distance_pct_15m < 1.0%  (entry_too_close_to_support)
+    - Longs when 5m RSI > 78 (rsi_chase_long)
+    - Shorts when 5m RSI < 22 (rsi_chase_short)
+
+    Returns [0, 1] where 1 = almost certain rejection.
+    Falls back gracefully to 0 for any missing field so the cap is not
+    triggered when data is absent.
+    """
+    range_5m = feature.get("range_position_5m_12")
+    range_15m = feature.get("range_position_15m")
+    rsi_5m = feature.get("rsi_5m")
+
+    if side == "long":
+        res_dist = feature.get("resistance_distance_pct_15m")
+        if (
+            (range_5m is not None and range_5m > 0.80)
+            or (res_dist is not None and res_dist < 1.0)
+            or (rsi_5m is not None and rsi_5m > 78.0)
+        ):
+            return 1.0
+
+        # 5m range position: 0 below 0.60, ramps to 1 at/above 0.80
+        range5m_risk = normalize_range(range_5m, 0.60, 0.80) if range_5m is not None else 0.0
+
+        # 15m range position: 0 below 0.60, ramps to 1 at/above 0.90
+        range15m_risk = normalize_range(range_15m, 0.60, 0.90) if range_15m is not None else 0.0
+
+        # Resistance proximity: full risk when distance < 1.0%
+        if res_dist is None:
+            res_risk = 0.0
+        elif res_dist < 1.0:
+            res_risk = 1.0
+        else:
+            # 0 at 3%+, ramps up as price approaches resistance
+            res_risk = normalize_range(3.0 - res_dist, 0.0, 2.0)
+
+        # RSI chase: 0 at RSI=65, 1 at RSI=78+
+        if rsi_5m is None:
+            rsi_risk = 0.0
+        elif rsi_5m >= 78.0:
+            rsi_risk = 1.0
+        else:
+            rsi_risk = normalize_range(rsi_5m, 65.0, 78.0)
+
+        return clamp(
+            0.40 * range5m_risk
+            + 0.25 * range15m_risk
+            + 0.25 * res_risk
+            + 0.10 * rsi_risk,
+            0.0,
+            1.0,
+        )
+    else:  # short
+        sup_dist = feature.get("support_distance_pct_15m")
+        if (
+            (range_5m is not None and range_5m < 0.20)
+            or (sup_dist is not None and sup_dist < 1.0)
+            or (rsi_5m is not None and rsi_5m < 22.0)
+        ):
+            return 1.0
+
+        # 5m range position: 0 above 0.40, ramps to 1 at/below 0.20
+        if range_5m is not None:
+            range5m_risk = normalize_range(0.40 - range_5m, 0.0, 0.20)
+        else:
+            range5m_risk = 0.0
+
+        # 15m range position: 0 above 0.40, ramps to 1 at/below 0.10
+        if range_15m is not None:
+            range15m_risk = normalize_range(0.40 - range_15m, 0.0, 0.30)
+        else:
+            range15m_risk = 0.0
+
+        # Support proximity: full risk when distance < 1.0%
+        if sup_dist is None:
+            sup_risk = 0.0
+        elif sup_dist < 1.0:
+            sup_risk = 1.0
+        else:
+            sup_risk = normalize_range(3.0 - sup_dist, 0.0, 2.0)
+
+        # RSI chase: 0 at RSI=35, 1 at RSI=22 or below
+        if rsi_5m is None:
+            rsi_risk = 0.0
+        elif rsi_5m <= 22.0:
+            rsi_risk = 1.0
+        else:
+            rsi_risk = normalize_range(35.0 - rsi_5m, 0.0, 13.0)
+
+        return clamp(
+            0.40 * range5m_risk
+            + 0.25 * range15m_risk
+            + 0.25 * sup_risk
+            + 0.10 * rsi_risk,
+            0.0,
+            1.0,
+        )
+
+
 def side_alignment_score(dir_15m: str, dir_1h: str, side: str) -> float:
     target = "bullish" if side == "long" else "bearish"
     support = 0.0

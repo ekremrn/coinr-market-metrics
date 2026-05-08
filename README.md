@@ -80,7 +80,7 @@ Response is cached in Redis for 5 minutes.
 curl -N http://localhost:8000/setups/stream
 ```
 
-## Metrics overview (v1.2)
+## Metrics overview (v1.3)
 Market metrics (all normalized 0..1 or categorical):
 - `tradeability_score`: composite of trend breadth, direction consensus, liquidity health, volatility usability, and taker alignment
 - `chop_score`: composite of low-ADX share, direction dispersion, and taker conflict share
@@ -109,10 +109,16 @@ Coin metrics (per symbol in top N):
 - `flags`: lightweight explanations
 - `relative_strength_score`: normalized BTC-relative strength
 - `rsi_15m`: RSI(14) on the 15m timeframe
-- `extension_score`: EMA/range/ATR/RSI-based stretch score (direction-aware: near-resistance penalises longs, near-support penalises shorts)
+- `extension_score`: backward-compatible symmetric EMA/range/ATR/RSI-based stretch score
+- `long_extension_score`, `short_extension_score`: side-aware stretch scores used by CoinR scanner routing
 - `fakeout_risk`: quick-failure risk for the current move
 - `execution_cost_score`: spread + volatility usability score
 - `long_score`, `short_score`: side-specific setup quality
+- `long_entry_risk`, `short_entry_risk`: side-specific entry-location risk; CoinR hard-reject equivalents return `1.0`
+- `range_position_15m`, `range_position_5m_12`: current price position in recent 15m / 5m ranges
+- `support_distance_pct_15m`, `resistance_distance_pct_15m`: nearest valid support/resistance distance from current price
+- `support_touches_15m`, `resistance_touches_15m`: recent near-level touch counts
+- `rsi_5m`, `taker_dominance_5m`: 5m entry quality fields aligned with CoinR analysis checks
 - `regime_label`, `diagnostic_tags`: richer symbol context without changing compatibility flags
   - tags include `rsi_overbought` (RSI≥70) and `rsi_oversold` (RSI≤30)
 

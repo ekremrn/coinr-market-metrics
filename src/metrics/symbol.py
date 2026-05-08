@@ -18,6 +18,7 @@ from .scores import (
     extension_score_from_feature,
     fakeout_risk_from_feature,
     relative_strength_from_returns,
+    side_entry_risk_from_feature,
     side_score_from_feature,
 )
 
@@ -57,6 +58,8 @@ def build_symbol_diagnostic_tags(
     short_score: float,
     long_exhaustion_risk: float,
     short_exhaustion_risk: float,
+    long_entry_risk: float = 0.0,
+    short_entry_risk: float = 0.0,
 ) -> List[str]:
     tags: List[str] = []
     if feature.get("direction_consensus", 0.5) >= 0.75:
@@ -90,6 +93,45 @@ def build_symbol_diagnostic_tags(
             tags.append("rsi_overbought")
         elif rsi_15m <= 30:
             tags.append("rsi_oversold")
+
+    # Entry-location diagnostic tags — mirror CoinR analysis rejection codes
+    range_5m = feature.get("range_position_5m_12")
+    if range_5m is not None:
+        if range_5m > 0.80:
+            tags.append("long_entry_near_range_top")
+        if range_5m < 0.20:
+            tags.append("short_entry_near_range_bottom")
+
+    res_dist = feature.get("resistance_distance_pct_15m")
+    if res_dist is not None and res_dist < 1.0:
+        tags.append("long_near_resistance")
+
+    sup_dist = feature.get("support_distance_pct_15m")
+    if sup_dist is not None and sup_dist < 1.0:
+        tags.append("short_near_support")
+
+    if long_entry_risk >= 0.70:
+        tags.append("long_entry_risk_high")
+    if short_entry_risk >= 0.70:
+        tags.append("short_entry_risk_high")
+
+    rsi_5m = feature.get("rsi_5m")
+    if rsi_5m is not None:
+        if rsi_5m > 78.0:
+            tags.append("rsi_chase_long")
+        if rsi_5m < 22.0:
+            tags.append("rsi_chase_short")
+
+    adx_15m = feature.get("adx_15m")
+    if adx_15m is not None and adx_15m < 25.0:
+        tags.append("adx_cap_applied")
+
+    dom_5m = feature.get("taker_dominance_5m", "neutral")
+    if dom_5m == "buy_dominant":
+        tags.append("taker_5m_conflict_short")
+    elif dom_5m == "sell_dominant":
+        tags.append("taker_5m_conflict_long")
+
     return tags
 
 
@@ -164,6 +206,45 @@ def build_symbol_metrics(
         fakeout_risk,
         short_exhaustion_risk,
     )
+
+    # Compute entry risks for scoring and cap logic.
+    long_entry_risk = side_entry_risk_from_feature(feature, "long")
+    short_entry_risk = side_entry_risk_from_feature(feature, "short")
+
+    # Hard caps: prevent scanner-grade scores when CoinR analysis will
+    # deterministically reject the setup.  Cap = 0.60 keeps the score clearly
+    # below CoinR's 0.65 pre-filter threshold.
+    _CAP = 0.60
+
+    # ADX < 25 → both sides capped.  CoinR analysis hard-rejects adx_too_low
+    # at ADX 15m < 25; the existing adx15_low flag uses 22 as a softer signal.
+    adx_15m_val = adx_15m if adx_15m is not None else 0.0
+    if adx_15m_val < 25.0:
+        long_score = min(long_score, _CAP)
+        short_score = min(short_score, _CAP)
+
+    # Opposite 5m taker → cap the conflicted side.
+    # CoinR uses 5m taker (10-bar, ratio > 1.15 / < 0.85) for momentum_against_direction.
+    dom_5m = feature.get("taker_dominance_5m", "neutral")
+    if dom_5m == "buy_dominant":
+        short_score = min(short_score, _CAP)
+    elif dom_5m == "sell_dominant":
+        long_score = min(long_score, _CAP)
+
+    # Entry risk ≥ 0.70 → cap that side (range top/bottom, near S/R)
+    if long_entry_risk >= 0.70:
+        long_score = min(long_score, _CAP)
+    if short_entry_risk >= 0.70:
+        short_score = min(short_score, _CAP)
+
+    # 5m RSI chase → CoinR hard-rejects rsi_chase_long / rsi_chase_short
+    rsi_5m_val = feature.get("rsi_5m")
+    if rsi_5m_val is not None:
+        if rsi_5m_val > 78.0:
+            long_score = min(long_score, _CAP)
+        if rsi_5m_val < 22.0:
+            short_score = min(short_score, _CAP)
+
     regime_label = determine_symbol_regime_label(feature, extension_score, fakeout_risk)
     diagnostic_tags = build_symbol_diagnostic_tags(
         feature,
@@ -175,6 +256,8 @@ def build_symbol_metrics(
         short_score,
         long_exhaustion_risk,
         short_exhaustion_risk,
+        long_entry_risk=long_entry_risk,
+        short_entry_risk=short_entry_risk,
     )
 
     return {
@@ -191,13 +274,28 @@ def build_symbol_metrics(
         "attractiveness_score": attractiveness,
         "flags": flags,
         "relative_strength_score": relative_strength_score,
+        # Backward-compatible symmetric extension score (side unknown)
         "extension_score": extension_score,
+        # Side-aware extension scores
+        "long_extension_score": long_extension,
+        "short_extension_score": short_extension,
         "long_exhaustion_risk": long_exhaustion_risk,
         "short_exhaustion_risk": short_exhaustion_risk,
         "fakeout_risk": fakeout_risk,
         "execution_cost_score": execution_cost_score,
         "long_score": long_score,
         "short_score": short_score,
+        # Entry-quality fields
+        "long_entry_risk": long_entry_risk,
+        "short_entry_risk": short_entry_risk,
+        "range_position_15m": feature.get("range_position_15m"),
+        "range_position_5m_12": feature.get("range_position_5m_12"),
+        "support_distance_pct_15m": feature.get("support_distance_pct_15m"),
+        "resistance_distance_pct_15m": feature.get("resistance_distance_pct_15m"),
+        "support_touches_15m": feature.get("support_touches_15m"),
+        "resistance_touches_15m": feature.get("resistance_touches_15m"),
+        "rsi_5m": feature.get("rsi_5m"),
+        "taker_dominance_5m": feature.get("taker_dominance_5m", "neutral"),
         "regime_label": regime_label,
         "diagnostic_tags": diagnostic_tags,
     }

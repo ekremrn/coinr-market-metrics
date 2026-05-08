@@ -162,12 +162,50 @@ def compute_taker_conflict(direction: str, dominance: str) -> bool:
     )
 
 
+def compute_swing_high(highs: List[float], window: int) -> Optional[float]:
+    if len(highs) < window:
+        return None
+    return max(highs[-window:])
+
+
+def compute_swing_low(lows: List[float], window: int) -> Optional[float]:
+    if len(lows) < window:
+        return None
+    return min(lows[-window:])
+
+
+def compute_level_touches(
+    highs: List[float],
+    lows: List[float],
+    level: float,
+    tolerance_frac: float,
+    window: int,
+    side: str,
+) -> int:
+    """Count bars where price touched a level within tolerance_frac of that level.
+
+    side='support': checks lows <= level * (1 + tolerance_frac)
+    side='resistance': checks highs >= level * (1 - tolerance_frac)
+    """
+    count = 0
+    if side == "support":
+        for low in lows[-window:]:
+            if low <= level * (1.0 + tolerance_frac):
+                count += 1
+    else:
+        for high in highs[-window:]:
+            if high >= level * (1.0 - tolerance_frac):
+                count += 1
+    return count
+
+
 def build_symbol_features(
     symbol: str,
     klines_15m: Optional[List[List[Any]]],
     klines_1h: Optional[List[List[Any]]],
     book: Optional[Dict[str, Any]],
     funding_rate: Optional[float] = None,
+    klines_5m: Optional[List[List[Any]]] = None,
 ) -> Dict[str, Any]:
     parsed_15m = parse_klines(klines_15m)
     parsed_1h = parse_klines(klines_1h)
@@ -222,6 +260,84 @@ def build_symbol_features(
     taker_conflict_15m = compute_taker_conflict(dir_15m, taker_dominance)
     direction_consensus = compute_direction_consensus(dir_15m, dir_1h, return_15m_4, return_1h_6)
 
+    # --- 5m-derived features (optional — absent when 5m klines not fetched) ---
+    # range_position_5m_12 matches CoinR analysis agent's "position_in_range"
+    # logic: 12-bar window, thresholds 0.80/0.20 for range-top/bottom rejection.
+    # taker_dominance_5m uses the same 10-bar window and 1.15/0.85 ratio
+    # thresholds as CoinR's pre-validation taker check.
+    range_position_5m_12: Optional[float] = None
+    rsi_5m: Optional[float] = None
+    taker_ratio_5m: Optional[float] = None
+    taker_dominance_5m: str = "neutral"
+
+    if klines_5m is not None:
+        parsed_5m = parse_klines(klines_5m)
+        closes_5m = parsed_5m["closes"]
+        highs_5m = parsed_5m["highs"]
+        lows_5m = parsed_5m["lows"]
+        volumes_5m = parsed_5m["volumes"]
+        price_5m = closes_5m[-1] if closes_5m else price
+
+        range_position_5m_12 = compute_range_position(highs_5m, lows_5m, price_5m, window=12)
+        rsi_5m = compute_rsi(closes_5m, period=14)
+        taker_ratio_5m, taker_dominance_5m = compute_taker_dominance(
+            parsed_5m["taker_buy_base"],
+            volumes_5m,
+            window=10,
+        )
+
+    # --- Support / resistance levels ---
+    # Near S/R: 8 × 15m = 2 hours (short-term ceiling/floor)
+    # Key S/R:  12 × 1h = 3 days  (medium-term significant levels)
+    # Distance uses the nearest level from both layers — most restrictive.
+    # CoinR analysis rejects entries within 1.0% of support/resistance.
+    support_near_15m = compute_swing_low(lows_15m, window=8)
+    resistance_near_15m = compute_swing_high(highs_15m, window=8)
+
+    highs_1h = parsed_1h["highs"]
+    lows_1h = parsed_1h["lows"]
+    support_key_1h = compute_swing_low(lows_1h, window=12)
+    resistance_key_1h = compute_swing_high(highs_1h, window=12)
+
+    support_distance_pct_15m: Optional[float] = None
+    resistance_distance_pct_15m: Optional[float] = None
+    support_touches_15m: Optional[int] = None
+    resistance_touches_15m: Optional[int] = None
+
+    if price is not None and price > 0:
+        # nearest support = highest valid level below price
+        support_candidates = [
+            level
+            for level in (support_near_15m, support_key_1h)
+            if level is not None and level < price
+        ]
+        if support_candidates:
+            nearest_support = max(support_candidates)
+            support_distance_pct_15m = max((price - nearest_support) / price * 100.0, 0.0)
+
+        # nearest resistance = lowest valid level above price
+        resistance_candidates = [
+            level
+            for level in (resistance_near_15m, resistance_key_1h)
+            if level is not None and level > price
+        ]
+        if resistance_candidates:
+            nearest_resistance = min(resistance_candidates)
+            resistance_distance_pct_15m = max((nearest_resistance - price) / price * 100.0, 0.0)
+
+    # Adaptive touch tolerance: 0.15 × atrp_15m as fraction of level price.
+    # Using ATR% makes the tolerance wider for volatile symbols and tighter
+    # for stable ones, avoiding both false touches and missed touches.
+    touch_tolerance = 0.0015 * (atrp_15m or 0.5)
+    if support_near_15m is not None:
+        support_touches_15m = compute_level_touches(
+            highs_15m, lows_15m, support_near_15m, touch_tolerance, window=8, side="support"
+        )
+    if resistance_near_15m is not None:
+        resistance_touches_15m = compute_level_touches(
+            highs_15m, lows_15m, resistance_near_15m, touch_tolerance, window=8, side="resistance"
+        )
+
     return {
         "symbol": symbol,
         "price": price,
@@ -247,4 +363,14 @@ def build_symbol_features(
         "taker_conflict_15m": taker_conflict_15m,
         "direction_consensus": direction_consensus,
         "rsi_15m": rsi_15m,
+        # 5m entry fields
+        "range_position_5m_12": range_position_5m_12,
+        "rsi_5m": rsi_5m,
+        "taker_ratio_5m": taker_ratio_5m,
+        "taker_dominance_5m": taker_dominance_5m,
+        # Support / resistance
+        "support_distance_pct_15m": support_distance_pct_15m,
+        "resistance_distance_pct_15m": resistance_distance_pct_15m,
+        "support_touches_15m": support_touches_15m,
+        "resistance_touches_15m": resistance_touches_15m,
     }

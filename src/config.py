@@ -54,10 +54,10 @@ class ApiConfig:
 @dataclass(frozen=True)
 class AppConfig:
     """Scanner / application-level configuration."""
-    top_n: int = field(default_factory=lambda: int(os.getenv("TOP_N", "20")))
-    candidates_k: int = field(default_factory=lambda: int(os.getenv("CANDIDATES_K", "5")))
+    top_n: int = field(default_factory=lambda: int(os.getenv("TOP_N", "30")))
+    candidates_k: int = field(default_factory=lambda: int(os.getenv("CANDIDATES_K", "20")))
     blacklist: Set[str] = field(default_factory=lambda: _csv_set(os.getenv("BLACKLIST", "")))
-    metrics_version: str = field(default_factory=lambda: os.getenv("METRICS_VERSION", "v1.1"))
+    metrics_version: str = field(default_factory=lambda: os.getenv("METRICS_VERSION", "v1.3"))
     include_symbols_in_mongo: bool = field(
         default_factory=lambda: os.getenv("INCLUDE_SYMBOLS_IN_MONGO", "false").lower() == "true"
     )
