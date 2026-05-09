@@ -252,9 +252,9 @@ def test_build_market_metrics_detects_exhaustion_environment():
             volume_confirmation_15m=0.2,
             vol_ratio_15m=0.5,  # declining volume — characteristic of exhaustion
             taker_conflict_15m=True,
-            ema_distance_atr_15m=2.3,
-            range_position_15m=0.99,
-            spread_bps=7.5,
+            ema_distance_atr_15m=2.6,  # bumped from 2.3: higher extension keeps
+            range_position_15m=0.99,   # breakout_failure_risk above 0.7 with updated
+            spread_bps=7.5,            # fakeout weights (taker_conflict: 0.24 → 0.15)
         )
         for i in range(4)
     ]

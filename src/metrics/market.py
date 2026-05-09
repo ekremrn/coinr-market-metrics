@@ -23,6 +23,7 @@ from .scores import (
     fakeout_risk_from_feature,
     market_feature_weight,
     relative_strength_from_returns,
+    side_entry_risk_from_feature,
     side_score_from_feature,
 )
 
@@ -413,28 +414,50 @@ def build_market_metrics(
         short_exhaustion_risk = exhaustion_risk_from_feature(item, "short")
         extension_values.append(extension_score)
         fakeout_values.append(fakeout_risk)
-        long_scores.append(
-            side_score_from_feature(
-                "long",
-                item,
-                relative_strength_score,
-                execution_cost_score,
-                long_extension,
-                fakeout_risk,
-                long_exhaustion_risk,
-            )
+        long_s = side_score_from_feature(
+            "long",
+            item,
+            relative_strength_score,
+            execution_cost_score,
+            long_extension,
+            fakeout_risk,
+            long_exhaustion_risk,
         )
-        short_scores.append(
-            side_score_from_feature(
-                "short",
-                item,
-                relative_strength_score,
-                execution_cost_score,
-                short_extension,
-                fakeout_risk,
-                short_exhaustion_risk,
-            )
+        short_s = side_score_from_feature(
+            "short",
+            item,
+            relative_strength_score,
+            execution_cost_score,
+            short_extension,
+            fakeout_risk,
+            short_exhaustion_risk,
         )
+        # Apply the same hard caps used in build_symbol_metrics so that
+        # market-level environment scores reflect the true tradeable quality
+        # of the universe and do not trigger directional modes when most
+        # symbols would be deterministically rejected by the analysis agent.
+        _ENV_CAP = 0.60
+        adx_val = item.get("adx_15m") or 0.0
+        if adx_val < 25.0:
+            long_s = min(long_s, _ENV_CAP)
+            short_s = min(short_s, _ENV_CAP)
+        dom_5m = item.get("taker_dominance_5m", "neutral")
+        if dom_5m == "buy_dominant":
+            short_s = min(short_s, _ENV_CAP)
+        elif dom_5m == "sell_dominant":
+            long_s = min(long_s, _ENV_CAP)
+        if side_entry_risk_from_feature(item, "long") >= 0.70:
+            long_s = min(long_s, _ENV_CAP)
+        if side_entry_risk_from_feature(item, "short") >= 0.70:
+            short_s = min(short_s, _ENV_CAP)
+        rsi_5m_val = item.get("rsi_5m")
+        if rsi_5m_val is not None:
+            if rsi_5m_val > 78.0:
+                long_s = min(long_s, _ENV_CAP)
+            if rsi_5m_val < 22.0:
+                short_s = min(short_s, _ENV_CAP)
+        long_scores.append(long_s)
+        short_scores.append(short_s)
 
     extension_mean = weighted_mean(extension_values, alt_weights, 0.0)
     fakeout_mean = weighted_mean(fakeout_values, alt_weights, 0.0)
@@ -476,7 +499,6 @@ def build_market_metrics(
         0.0,
         1.0,
     )
-
     market_regime = "SELECTIVE"
     if (
         tradeability_score < 0.50
@@ -506,9 +528,17 @@ def build_market_metrics(
             or tradeability_score < 0.60
         )
         if not directional_only_blocked:
-            if long_environment_score - short_environment_score >= 0.18 and long_environment_score >= 0.62:
+            if (
+                mean_long_score > _ENV_CAP
+                and long_environment_score - short_environment_score >= 0.18
+                and long_environment_score >= 0.62
+            ):
                 recommended_mode = "LONG_ONLY"
-            elif short_environment_score - long_environment_score >= 0.18 and short_environment_score >= 0.62:
+            elif (
+                mean_short_score > _ENV_CAP
+                and short_environment_score - long_environment_score >= 0.18
+                and short_environment_score >= 0.62
+            ):
                 recommended_mode = "SHORT_ONLY"
 
     regime_detail = determine_market_regime_detail(

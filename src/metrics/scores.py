@@ -109,9 +109,11 @@ def exhaustion_risk_from_feature(feature: Dict[str, Any], side: str) -> float:
     if rsi_15m is None:
         rsi_score = 0.0
     elif side == "long":
-        rsi_score = normalize_range(rsi_15m, 62.0, 80.0)
+        # Penalise from RSI 68 (not 62): RSI 62-68 is normal in a healthy trend.
+        rsi_score = normalize_range(rsi_15m, 68.0, 82.0)
     else:
-        rsi_score = normalize_range(38.0 - rsi_15m, 0.0, 18.0)
+        # Short: penalise from RSI 32 (not 38); range 14 (was 18).
+        rsi_score = normalize_range(32.0 - rsi_15m, 0.0, 14.0)
 
     weak_volume = 1.0 - volume_confirmation
     taker_conflict = 1.0 if feature.get("taker_conflict_15m") else 0.0
@@ -140,11 +142,11 @@ def fakeout_risk_from_feature(
     taker_conflict = 1.0 if feature.get("taker_conflict_15m") else 0.0
     weak_volume = 1.0 - clamp(feature.get("volume_confirmation_15m", 0.0), 0.0, 1.0)
     return clamp(
-        0.18 * local_chop
-        + 0.24 * taker_conflict
+        0.25 * local_chop
+        + 0.15 * taker_conflict
         + 0.28 * weak_volume
         + 0.15 * extension_score
-        + 0.15 * (1.0 - execution_cost_score),
+        + 0.17 * (1.0 - execution_cost_score),
         0.0,
         1.0,
     )
@@ -302,14 +304,14 @@ def side_score_from_feature(
 
     score = clamp(
         0.18 * dir_alignment
-        + 0.10 * dominance
-        + 0.16 * relative_side
+        + 0.08 * dominance
+        + 0.12 * relative_side
         + 0.10 * (1.0 - extension_score)
         + 0.12 * (1.0 - fakeout_risk)
         + 0.12 * (1.0 - exhaustion_risk)
         + 0.10 * execution_cost_score
         + 0.07 * volume_confirmation
-        + 0.03 * trend_score
+        + 0.09 * trend_score
         + 0.02 * consensus,
         0.0,
         1.0,

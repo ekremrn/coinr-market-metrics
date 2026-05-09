@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.metrics import build_symbol_features, build_symbol_metrics, select_candidates
+from src.metrics.market import build_market_metrics
 from src.metrics.scores import side_entry_risk_from_feature
 from src.config import AppConfig
 from api.models import SymbolMetrics
@@ -788,3 +789,197 @@ def test_fetch_klines_missing_5m_creates_error_record_not_crash():
     metrics = build_symbol_metrics(feature, "bullish", btc)
     assert "long_score" in metrics
     assert "short_score" in metrics
+
+
+# ---------------------------------------------------------------------------
+# Market-level environment score cap alignment
+# ---------------------------------------------------------------------------
+
+def _make_capped_feature(
+    symbol: str,
+    *,
+    adx_15m: float = 20.0,
+    taker_dominance_5m: str = "neutral",
+    rsi_5m: float | None = None,
+    range_position_5m_12: float | None = None,
+    resistance_distance_pct_15m: float | None = None,
+    support_distance_pct_15m: float | None = None,
+) -> dict[str, Any]:
+    """Build a feature dict that should trigger one or more hard caps."""
+    return make_feature(
+        symbol,
+        adx_15m=adx_15m,
+        dir_15m="bullish",
+        dir_1h="bullish",
+        taker_dominance_5m=taker_dominance_5m,
+        rsi_5m=rsi_5m,
+        range_position_5m_12=range_position_5m_12,
+        resistance_distance_pct_15m=resistance_distance_pct_15m,
+        support_distance_pct_15m=support_distance_pct_15m,
+        volume_confirmation_15m=0.7,
+        direction_consensus=0.8,
+    )
+
+
+def test_market_env_caps_adx_below_25():
+    """When all symbols have ADX < 25, the cap logic must reduce long/short
+    environment scores compared to a matched cohort with healthy ADX."""
+    features_capped = [
+        _make_capped_feature(f"COIN{i}USDT", adx_15m=19.0)
+        for i in range(20)
+    ]
+    features_capped.append(make_feature("BTCUSDT", adx_15m=19.0))
+
+    features_uncapped = [
+        make_feature(
+            f"COIN{i}USDT",
+            adx_15m=32.0,
+            dir_15m="bullish",
+            dir_1h="bullish",
+            taker_dominance_5m="neutral",
+            volume_confirmation_15m=0.7,
+            direction_consensus=0.8,
+        )
+        for i in range(20)
+    ]
+    features_uncapped.append(make_feature("BTCUSDT", adx_15m=32.0))
+
+    market_capped, _ = build_market_metrics(features_capped)
+    market_uncapped, _ = build_market_metrics(features_uncapped)
+
+    # ADX < 25 cap must reduce long environment score vs healthy ADX universe
+    assert market_capped["long_environment_score"] < market_uncapped["long_environment_score"], (
+        f"Expected ADX<25 cap to reduce long_env but got "
+        f"capped={market_capped['long_environment_score']:.4f}, "
+        f"uncapped={market_uncapped['long_environment_score']:.4f}"
+    )
+    assert market_capped["short_environment_score"] < market_uncapped["short_environment_score"], (
+        f"Expected ADX<25 cap to reduce short_env but got "
+        f"capped={market_capped['short_environment_score']:.4f}, "
+        f"uncapped={market_uncapped['short_environment_score']:.4f}"
+    )
+
+
+def test_market_env_capped_mean_blocks_directional_mode_even_when_env_is_high():
+    """A capped universe must not emit LONG_ONLY just because aggregate env
+    additives lift long_environment_score above the directional threshold."""
+    features = [
+        make_feature(
+            f"COIN{i}USDT",
+            adx_15m=24.0,  # caps both symbol side scores at 0.60
+            adx_1h=35.0,
+            dir_15m="bullish",
+            dir_1h="bullish",
+            taker_dominance_15m="buy_dominant",
+            taker_dominance_5m="neutral",
+            volume_confirmation_15m=0.5,
+            vol_ratio_15m=0.5,
+            spread_bps=0.5,
+            direction_consensus=1.0,
+            return_15m_4=0.04,
+            return_1h_6=0.08,
+        )
+        for i in range(20)
+    ]
+    features.append(
+        make_feature(
+            "BTCUSDT",
+            adx_15m=24.0,
+            adx_1h=35.0,
+            dir_15m="bullish",
+            dir_1h="bullish",
+            taker_dominance_15m="buy_dominant",
+            volume_confirmation_15m=0.5,
+            vol_ratio_15m=0.5,
+            spread_bps=0.5,
+            direction_consensus=1.0,
+        )
+    )
+
+    market, _ = build_market_metrics(features)
+
+    assert market["long_environment_score"] >= 0.62
+    assert market["recommended_mode"] == "SELECTIVE"
+
+
+def test_market_env_caps_sell_dominant_5m_taker():
+    """Sell-dominant 5m taker should cap long scores per symbol, reducing
+    long_environment_score relative to a neutral-taker control group."""
+    features_sell_dom = [
+        _make_capped_feature(f"COIN{i}USDT", adx_15m=30.0, taker_dominance_5m="sell_dominant")
+        for i in range(20)
+    ]
+    features_sell_dom.append(make_feature("BTCUSDT", adx_15m=30.0))
+
+    features_neutral = [
+        _make_capped_feature(f"COIN{i}USDT", adx_15m=30.0, taker_dominance_5m="neutral")
+        for i in range(20)
+    ]
+    features_neutral.append(make_feature("BTCUSDT", adx_15m=30.0))
+
+    market_sell_dom, _ = build_market_metrics(features_sell_dom)
+    market_neutral, _ = build_market_metrics(features_neutral)
+
+    # Sell-dominant cap must reduce long_environment_score vs neutral baseline
+    assert market_sell_dom["long_environment_score"] < market_neutral["long_environment_score"], (
+        f"Expected sell_dominant taker cap to reduce long_env but got "
+        f"sell_dom={market_sell_dom['long_environment_score']:.4f}, "
+        f"neutral={market_neutral['long_environment_score']:.4f}"
+    )
+
+
+def test_market_env_caps_rsi_chase_long():
+    """RSI > 78 on all symbols should cap long scores per symbol, reducing
+    long_environment_score relative to a non-overbought control group."""
+    features_chase = [
+        _make_capped_feature(f"COIN{i}USDT", adx_15m=30.0, rsi_5m=82.0)
+        for i in range(20)
+    ]
+    features_chase.append(make_feature("BTCUSDT", adx_15m=30.0))
+
+    features_normal = [
+        _make_capped_feature(f"COIN{i}USDT", adx_15m=30.0, rsi_5m=60.0)
+        for i in range(20)
+    ]
+    features_normal.append(make_feature("BTCUSDT", adx_15m=30.0))
+
+    market_chase, _ = build_market_metrics(features_chase)
+    market_normal, _ = build_market_metrics(features_normal)
+
+    # RSI chase cap must reduce long_environment_score vs non-overbought baseline
+    assert market_chase["long_environment_score"] < market_normal["long_environment_score"], (
+        f"Expected RSI chase cap to reduce long_env but got "
+        f"chase={market_chase['long_environment_score']:.4f}, "
+        f"normal={market_normal['long_environment_score']:.4f}"
+    )
+
+
+def test_market_env_no_caps_on_clean_trend():
+    """A clean trending market must NOT be suppressed by the cap logic.
+    Scores should be able to reach above 0.62."""
+    features = [
+        make_feature(
+            f"COIN{i}USDT",
+            adx_15m=33.0,
+            dir_15m="bullish",
+            dir_1h="bullish",
+            taker_dominance_5m="buy_dominant",
+            rsi_5m=62.0,
+            volume_confirmation_15m=0.8,
+            direction_consensus=0.9,
+            range_position_5m_12=0.55,
+            resistance_distance_pct_15m=3.0,
+        )
+        for i in range(20)
+    ]
+    features.append(make_feature("BTCUSDT", adx_15m=34.0, dir_15m="bullish", dir_1h="bullish"))
+
+    market, _btc_dir = build_market_metrics(features)
+
+    # In a genuine strong trend, long scores should be meaningfully above the
+    # suppression cap — otherwise the cap itself is too aggressive.
+    assert market["long_environment_score"] > 0.60, (
+        f"long_environment_score={market['long_environment_score']:.4f} was unexpectedly capped "
+        "in a clean trending market"
+    )
+    assert market["recommended_mode"] == "LONG_ONLY"
