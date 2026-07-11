@@ -133,6 +133,9 @@ Coin metrics (per symbol in top N):
     default remains the backward-compatible compact candidate archive.
   - `python -m src.mongo_maintenance` prints the snapshot index plan without a
     database connection. Applying it requires `--apply-indexes --confirm APPLY_INDEXES`.
+  - `python -m src.snapshot_retention --days 7` previews expired compact
+    snapshots. Deletion is bounded to 500 documents per batch by default and
+    requires `--apply --confirm APPLY_RETENTION`.
   - Historical setups are read from hardcoded DB `coinr`, collection `analyses`
 
 ## Cronjob example (every 5 minutes)
@@ -140,6 +143,7 @@ The scanner is a one-shot job designed to be triggered by a cron. Add a crontab 
 
 ```cron
 */5 * * * * cd /path/to/coinr-market-metrics && docker compose up market-scanner
+15 1 * * * cd /path/to/coinr-market-metrics && docker compose run --rm --no-deps market-scanner python -m src.snapshot_retention --days 7 --apply --confirm APPLY_RETENTION
 ```
 
 Notes:
