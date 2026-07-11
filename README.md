@@ -128,6 +128,11 @@ Coin metrics (per symbol in top N):
   - Pubsub: `market_state:events`
   - Shared `MONGO_URI` is used for both Mongo connections
   - Market snapshots are stored in hardcoded DB `coinr-market-metrics`, collection `market_state_snapshots`
+  - `INCLUDE_SYMBOLS_IN_MONGO=true` adds the full symbol universe plus
+    `replay_archive` coverage metadata for CoinR historical scanner replay. The
+    default remains the backward-compatible compact candidate archive.
+  - `python -m src.mongo_maintenance` prints the snapshot index plan without a
+    database connection. Applying it requires `--apply-indexes --confirm APPLY_INDEXES`.
   - Historical setups are read from hardcoded DB `coinr`, collection `analyses`
 
 ## Cronjob example (every 5 minutes)

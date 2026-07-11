@@ -34,6 +34,8 @@ This repository is a Python microservice that computes Binance USDT perpetual fu
 - `src/config.py` - environment-backed dataclass config and shared database name constants. New env vars should be defined here and mirrored in `.env.example`.
 - `src/binance_client.py` - Binance Futures REST wrapper with async rate limiting, retry/backoff behavior, and universe selection quality gates.
 - `src/storage.py` - Redis, async Redis, Redis pubsub fan-out, and MongoDB wrappers. API and scanner code should use these wrappers instead of raw clients.
+- `src/snapshot_archive.py` - pure additive Mongo archive shape and declarative index specs for full-universe replay.
+- `src/mongo_maintenance.py` - dry-run-first snapshot index application; writes require an explicit confirmation token.
 - `src/indicators.py` - lightweight NumPy indicator implementations such as EMA, SMA, ATR, ADX, and RSI.
 - `src/utils.py` - small cross-cutting helpers for clamping, UTC timestamps, and safe float parsing.
 - `src/logging.py` - stdout logger factory with env-controlled level and structured context support.
@@ -78,6 +80,10 @@ Request/data flow for market state:
 9. Redis keys: `market_state:latest`, `market_state:symbols:latest`, `market_state:candidates:latest`
 10. Redis pubsub channel: `market_state:events`
 11. MongoDB collection: `coinr-market-metrics.market_state_snapshots`
+
+`INCLUDE_SYMBOLS_IN_MONGO=true` archives the full `symbols` universe plus
+explicit `replay_archive` completeness metadata. The default compact archive
+remains backward compatible and retains `candidates`.
 12. API routes in `api/routes/scanner.py` expose latest, history, and SSE streams.
 
 Key boundaries:

@@ -16,6 +16,7 @@ from src.metrics import (
     stabilize_market_bias,
 )
 from src.storage import MongoStore, RedisStore
+from src.snapshot_archive import build_mongo_snapshot_document
 from src.utils import utc_now_iso, utc_now_ms
 
 
@@ -286,18 +287,12 @@ async def store_snapshot(
     # Store to MongoDB
     try:
         mongo_store = MongoStore(MongoConfig())
-        mongo_doc = {
-            "ts": snapshot["ts"],
-            "ts_ms": snapshot["ts_ms"],
-            "version": app_cfg.metrics_version,
-            "status": snapshot["status"],
-            "errors": snapshot["errors"],
-            "universe": snapshot["universe"],
-            "market": snapshot["market"],
-            "candidates": candidates,
-        }
-        if app_cfg.include_symbols_in_mongo:
-            mongo_doc["symbols"] = symbol_metrics
+        mongo_doc = build_mongo_snapshot_document(
+            snapshot,
+            symbol_metrics,
+            candidates,
+            include_symbols=app_cfg.include_symbols_in_mongo,
+        )
         mongo_store.insert_snapshot(mongo_doc)
     except Exception as exc:  # noqa: BLE001
         logger.error("Mongo insert failed", exc_info=True, context=None)
